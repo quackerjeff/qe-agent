@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createLogger } from "../logging/index.js";
 import { runInit } from "./init.js";
+import { runAnalyze } from "./analyze.js";
 
 async function getVersion(): Promise<string> {
   const __filename = fileURLToPath(import.meta.url);
@@ -46,11 +47,16 @@ async function main(): Promise<void> {
   program
     .command("analyze")
     .description("Analyze repository structure and QE capabilities")
-    .action(() => {
-      console.error(
-        "qe analyze: not yet implemented (planned for Milestone 1)",
-      );
-      process.exit(1);
+    .option("--repo <path>", "Path to repository (default: current directory)")
+    .option("--json", "Output analysis as JSON")
+    .action(async (opts) => {
+      const logger = createLogger("INFO");
+      try {
+        await runAnalyze(opts, logger);
+      } catch (err) {
+        logger.error(err instanceof Error ? err.message : "Analysis failed");
+        process.exit(1);
+      }
     });
 
   program

@@ -107,3 +107,25 @@ export const ValidationActionType = z.enum([
   "CUSTOM",
 ]);
 export type ValidationActionType = z.infer<typeof ValidationActionType>;
+
+export const TechnologyCategory = z.enum([
+  "language",
+  "framework",
+  "packageManager",
+  "buildSystem",
+  "testFramework",
+  "ciSystem",
+]);
+export type TechnologyCategory = z.infer<typeof TechnologyCategory>;
+
+export const CommandCategory = z.enum([
+  "INSTALL",
+  "BUILD",
+  "TEST",
+  "LINT",
+  "TYPECHECK",
+  "BROWSER",
+  "START",
+  "OTHER",
+]);
+export type CommandCategory = z.infer<typeof CommandCategory>;

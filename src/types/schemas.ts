@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  CommandCategory,
   Confidence,
   EvidenceProvenance,
   EvidenceStatus,
@@ -11,6 +12,7 @@ import {
   RequirementPriority,
   RequirementStatus,
   RiskLevel,
+  TechnologyCategory,
   ValidationActionType,
   Verdict,
 } from "./domain.js";
@@ -146,34 +148,64 @@ export const ValidationPlanSchema = z.object({
 });
 export type ValidationPlan = z.infer<typeof ValidationPlanSchema>;
 
+export const DetectionEvidenceSchema = z.object({
+  source: z.string(),
+  reason: z.string(),
+});
+export type DetectionEvidence = z.infer<typeof DetectionEvidenceSchema>;
+
 export const DetectedTechnologySchema = z.object({
+  id: z.string(),
   name: z.string(),
+  category: TechnologyCategory,
   version: z.string().optional(),
   confidence: z.number().min(0).max(1),
-  detectedFrom: z.string(),
+  evidence: z.array(DetectionEvidenceSchema),
 });
+export type DetectedTechnology = z.infer<typeof DetectedTechnologySchema>;
+
+export const DiscoveredCommandSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  category: CommandCategory,
+  command: z.string(),
+  source: z.string(),
+  confidence: z.number().min(0).max(1),
+});
+export type DiscoveredCommand = z.infer<typeof DiscoveredCommandSchema>;
+
+export const ApplicationProfileSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  path: z.string(),
+  type: z.string().optional(),
+});
+export type ApplicationProfile = z.infer<typeof ApplicationProfileSchema>;
+
+export const GitInfoSchema = z.object({
+  detected: z.boolean(),
+  root: z.string().optional(),
+  branch: z.string().optional(),
+});
+export type GitInfo = z.infer<typeof GitInfoSchema>;
 
 export const RepositoryProfileSchema = z.object({
   root: z.string(),
+  git: GitInfoSchema,
   languages: z.array(DetectedTechnologySchema),
   frameworks: z.array(DetectedTechnologySchema),
   packageManagers: z.array(DetectedTechnologySchema),
   buildSystems: z.array(DetectedTechnologySchema),
   testFrameworks: z.array(DetectedTechnologySchema),
   ciSystems: z.array(DetectedTechnologySchema),
+  applications: z.array(ApplicationProfileSchema),
   documentation: z.array(
     z.object({
       path: z.string(),
       type: z.string(),
     }),
   ),
-  commands: z.array(
-    z.object({
-      name: z.string(),
-      command: z.string(),
-      source: z.string(),
-    }),
-  ),
+  commands: z.array(DiscoveredCommandSchema),
   capabilities: z.array(CapabilitySchema),
   confidence: z.number().min(0).max(1),
 });

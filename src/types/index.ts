@@ -12,6 +12,8 @@ export {
   RequirementStatus,
   RequirementPriority,
   ValidationActionType,
+  TechnologyCategory,
+  CommandCategory,
 } from "./domain.js";
 
 export {
@@ -24,6 +26,11 @@ export {
   RiskAssessmentSchema,
   ValidationActionSchema,
   ValidationPlanSchema,
+  DetectionEvidenceSchema,
+  DetectedTechnologySchema,
+  DiscoveredCommandSchema,
+  ApplicationProfileSchema,
+  GitInfoSchema,
   RepositoryProfileSchema,
   ChangeAnalysisSchema,
   ExecutionBudgetSchema,
@@ -42,6 +49,11 @@ export type {
   RiskAssessment,
   ValidationAction,
   ValidationPlan,
+  DetectionEvidence,
+  DetectedTechnology,
+  DiscoveredCommand,
+  ApplicationProfile,
+  GitInfo,
   RepositoryProfile,
   ChangeAnalysis,
   ExecutionBudget,

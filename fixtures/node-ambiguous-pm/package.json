@@ -1,0 +1,12 @@
+{
+  "name": "ambiguous-pm-fixture",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

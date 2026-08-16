@@ -271,33 +271,65 @@ describe("RepositoryProfile schema", () => {
   it("validates a repository profile", () => {
     const result = RepositoryProfileSchema.safeParse({
       root: "/tmp/repo",
+      git: { detected: true, root: "/tmp/repo", branch: "main" },
       languages: [
         {
+          id: "typescript",
           name: "TypeScript",
+          category: "language",
           version: "5.5",
           confidence: 0.95,
-          detectedFrom: "tsconfig.json",
+          evidence: [
+            {
+              source: "tsconfig.json",
+              reason: "TypeScript configuration file",
+            },
+          ],
         },
       ],
       frameworks: [],
       packageManagers: [
         {
+          id: "npm",
           name: "npm",
+          category: "packageManager",
           confidence: 0.99,
-          detectedFrom: "package-lock.json",
+          evidence: [
+            {
+              source: "package-lock.json",
+              reason: "npm lockfile detected",
+            },
+          ],
         },
       ],
       buildSystems: [],
       testFrameworks: [
         {
-          name: "vitest",
+          id: "vitest",
+          name: "Vitest",
+          category: "testFramework",
           confidence: 0.9,
-          detectedFrom: "vitest.config.ts",
+          evidence: [
+            {
+              source: "vitest.config.ts",
+              reason: "Vitest configuration file",
+            },
+          ],
         },
       ],
       ciSystems: [],
+      applications: [],
       documentation: [{ path: "README.md", type: "readme" }],
-      commands: [{ name: "test", command: "npm test", source: "package.json" }],
+      commands: [
+        {
+          id: "test",
+          name: "test",
+          category: "TEST",
+          command: "npm test",
+          source: "package.json",
+          confidence: 0.95,
+        },
+      ],
       capabilities: [
         {
           id: "node.vitest",
@@ -316,11 +348,16 @@ describe("RepositoryProfile schema", () => {
 function makeRepositoryProfile() {
   return {
     root: "/tmp/repo",
+    git: { detected: false },
     languages: [
       {
+        id: "typescript",
         name: "TypeScript",
+        category: "language" as const,
         confidence: 0.95,
-        detectedFrom: "tsconfig.json",
+        evidence: [
+          { source: "tsconfig.json", reason: "TypeScript configuration file" },
+        ],
       },
     ],
     frameworks: [],
@@ -328,6 +365,7 @@ function makeRepositoryProfile() {
     buildSystems: [],
     testFrameworks: [],
     ciSystems: [],
+    applications: [],
     documentation: [],
     commands: [],
     capabilities: [],
