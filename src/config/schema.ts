@@ -15,6 +15,8 @@ export const QEConfigSchema = z.object({
     .object({
       mode: z.enum(["auto", "local", "docker"]).default("auto"),
       maxMinutes: z.number().positive().default(20),
+      commandTimeoutSeconds: z.number().positive().default(300),
+      maxOutputBytes: z.number().positive().default(1_048_576),
     })
     .default({}),
 

@@ -60,6 +60,25 @@ export class ConsoleLogSink implements LogSink {
   }
 }
 
+export class StderrLogSink implements LogSink {
+  write(entry: LogEntry): void {
+    const parts = [entry.timestamp, `[${entry.level}]`];
+    if (entry.executionId) {
+      parts.push(`[${entry.executionId.slice(0, 8)}]`);
+    }
+    if (entry.component) {
+      parts.push(`[${entry.component}]`);
+    }
+    parts.push(entry.message);
+
+    process.stderr.write(parts.join(" ") + "\n");
+
+    if (entry.data && Object.keys(entry.data).length > 0) {
+      process.stderr.write(JSON.stringify(entry.data, null, 2) + "\n");
+    }
+  }
+}
+
 export class StructuredLogger implements Logger {
   constructor(
     private readonly sink: LogSink,

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Generate large output
+i=0
+while [ $i -lt 2000 ]; do
+  echo "line $i: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  i=$((i + 1))
+done
