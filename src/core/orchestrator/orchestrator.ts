@@ -15,6 +15,7 @@ import type {
   ExecutionMetrics,
   ModelCallMetadata,
   LifecycleTransition,
+  BaselineComparison,
 } from "../../types/index.js";
 import { QEResultSchema } from "../../types/index.js";
 import { createExecutionId } from "../../logging/index.js";
@@ -99,6 +100,7 @@ export class QEOrchestrator {
     let confidenceValue: QEResult["confidence"] = "LOW";
     let summaryValue = "";
     let recommendedNextActions: string[] = [];
+    const baselineComparisons: BaselineComparison[] = [];
 
     const controller =
       this.injectedController ??
@@ -403,22 +405,19 @@ export class QEOrchestrator {
               budget.recordRetry();
               evidence.push(comparison.baselineEvidence);
 
-              if (comparison.classification === "PRE_EXISTING") {
-                const existingFinding = findings.find(
-                  (f) => f.id === investigation.finding.id,
-                );
-                if (existingFinding) {
-                  existingFinding.title = `PRE_EXISTING: ${existingFinding.title}`;
-                  existingFinding.description = `Pre-existing failure (also fails on baseline). ${existingFinding.description}`;
-                }
-              }
+              baselineComparisons.push({
+                classification: comparison.classification,
+                targetEvidenceId: comparison.targetEvidenceId,
+                baselineEvidenceId: comparison.baselineEvidence.id,
+                validationActionId: failed.action.id,
+                explanation: `Baseline ${comparison.baselineExitCode === 0 ? "passed" : "failed"}, target ${comparison.targetExitCode === 0 ? "passed" : "failed"}`,
+              });
 
               if (comparison.classification === "INTRODUCED") {
                 const existingFinding = findings.find(
                   (f) => f.id === investigation.finding.id,
                 );
                 if (existingFinding) {
-                  existingFinding.title = `INTRODUCED: ${existingFinding.title}`;
                   existingFinding.category = "REGRESSION";
                 }
               }
@@ -586,6 +585,8 @@ export class QEOrchestrator {
       },
       evidence,
       findings,
+      baselineComparisons:
+        baselineComparisons.length > 0 ? baselineComparisons : undefined,
       requirements: requirementAssessments,
       remainingGaps,
       verdict: verdictValue,

@@ -1,8 +1,9 @@
 # Implementation Assignment — Milestone 3: QE Reasoning
 
 **Milestone:** 3  
-**Status:** Accepted for Implementation  
+**Status:** Accepted  
 **Depends On:** Milestone 2  
+**Accepted:** 2026-08-17  
 **Objective:** Introduce bounded QE reasoning for change understanding, risk assessment, validation planning, gap analysis, and evidence-supported verdict generation.
 
 # Required Reading

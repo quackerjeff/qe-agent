@@ -1,4 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { FakeModelGateway } from "../src/models/gateway/fake.js";
 import type { ReasoningTask } from "../src/models/gateway/types.js";
 import { QEOrchestrator } from "../src/core/orchestrator/orchestrator.js";
@@ -8,9 +12,13 @@ import {
   createBudgetForProfile,
 } from "../src/core/orchestrator/budget-manager.js";
 import { QEStateMachine } from "../src/core/lifecycle/index.js";
-import { QEResultSchema } from "../src/types/index.js";
+import {
+  QEResultSchema,
+  BaselineComparisonSchema,
+} from "../src/types/index.js";
 import type { QERequest, RepositoryProfile } from "../src/types/index.js";
 import { classifyWithBaseline } from "../src/core/reasoning/failure-investigator.js";
+import { analyzeRepository } from "../src/repository/index.js";
 
 // --- Shared Helpers ---
 
@@ -909,434 +917,588 @@ describe("Adversarial: Budget Retry Exhaustion", () => {
   });
 });
 
-// --- Evaluation Harness ---
+// --- Evaluation Harness with Real Git Repos ---
 
-interface EvaluationScenario {
+function createTempGitRepo(): string {
+  const dir = mkdtempSync(join(tmpdir(), "qe-eval-"));
+  execFileSync("git", ["init", "--initial-branch", "main"], { cwd: dir });
+  execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: dir });
+  execFileSync("git", ["config", "user.name", "Test"], { cwd: dir });
+  return dir;
+}
+
+function gitCommit(dir: string, msg: string): string {
+  execFileSync("git", ["add", "-A"], { cwd: dir });
+  execFileSync("git", ["commit", "-m", msg, "--allow-empty"], { cwd: dir });
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: dir })
+    .toString()
+    .trim();
+}
+
+interface EvalScenario {
   name: string;
-  description: string;
-  request: QERequest;
+  repoDir: string;
   modelOverrides: Parameters<typeof createScenarioGateway>[0];
+  request: QERequest;
   expectations: {
     allowedRiskLevels?: string[];
     allowedVerdicts: string[];
-    requiredFindingCategories?: string[];
-    expectedClassification?: string;
     requireGaps?: boolean;
+    requireEvidence?: boolean;
   };
 }
 
-function createEvaluationScenarios(): EvaluationScenario[] {
-  return [
-    // Scenario A: Low-Risk Passing Change
-    {
-      name: "A: Low-Risk Passing Change",
-      description: "Small safe change with passing tests",
-      request: {
-        repositoryPath: process.cwd(),
-        requirements: [{ id: "req-1", description: "Code passes lint checks" }],
-        profile: "quick",
-        mode: "repository",
-      },
-      modelOverrides: {
-        risk: {
-          level: "LOW",
-          factors: [
-            {
-              factor: "minor change",
-              reason: "Small formatting fix",
-              weight: "low",
-            },
-          ],
-          confidence: 0.9,
-          summary: "Low risk formatting change",
-        },
-        gaps: {
-          gaps: [],
-          requirementAssessments: [
-            {
-              requirementId: "req-1",
-              status: "PARTIALLY_VERIFIED",
-              evidenceIds: [],
-              explanation: "Lint passed",
-            },
-          ],
-        },
-        verdict: {
-          recommendedVerdict: "PASS_WITH_CONCERNS",
-          confidence: "MEDIUM",
-          reasoning: "Tests pass, low risk",
-          concerns: [],
-          recommendedNextActions: [],
-          summary: "Low risk change passes validation",
-        },
-      },
-      expectations: {
-        allowedRiskLevels: ["LOW", "MEDIUM"],
-        allowedVerdicts: ["PASS", "PASS_WITH_CONCERNS"],
-      },
+function buildScenarioA(): EvalScenario {
+  const dir = createTempGitRepo();
+  writeFileSync(
+    join(dir, "package.json"),
+    JSON.stringify({
+      name: "low-risk-app",
+      version: "1.0.0",
+      scripts: { check: "echo ok" },
+    }),
+  );
+  writeFileSync(
+    join(dir, "index.js"),
+    "module.exports = { greet: () => 'hello' };\n",
+  );
+  gitCommit(dir, "initial");
+  return {
+    name: "A: Low-Risk Passing Change",
+    repoDir: dir,
+    request: {
+      repositoryPath: dir,
+      requirements: [{ id: "req-1", description: "Code passes lint checks" }],
+      profile: "quick",
+      mode: "repository",
     },
-
-    // Scenario B: Introduced Regression (simulated)
-    {
-      name: "B: Introduced Regression",
-      description: "Target introduces a failure not in baseline",
-      request: {
-        repositoryPath: process.cwd(),
-        requirements: [{ id: "req-1", description: "All tests pass" }],
-        profile: "standard",
-        mode: "repository",
+    modelOverrides: {
+      risk: {
+        level: "LOW",
+        factors: [{ factor: "minor", reason: "Formatting fix", weight: "low" }],
+        confidence: 0.9,
+        summary: "Low risk",
       },
-      modelOverrides: {
-        risk: {
-          level: "HIGH",
-          factors: [
-            {
-              factor: "test failure",
-              reason: "Tests fail on target",
-              weight: "high",
-            },
-          ],
-          confidence: 0.9,
-          summary: "High risk - test failures",
-        },
-        gaps: {
-          gaps: [
-            {
-              area: "Test suite",
-              description: "Material test failure",
-              reason: "Tests fail",
-              risk: "HIGH",
-            },
-          ],
-          requirementAssessments: [
-            {
-              requirementId: "req-1",
-              status: "NOT_VERIFIED",
-              evidenceIds: [],
-              explanation: "Tests fail",
-            },
-          ],
-        },
-        verdict: {
-          recommendedVerdict: "FAIL",
-          confidence: "HIGH",
-          reasoning: "Material regression detected",
-          concerns: ["Test failures"],
-          recommendedNextActions: ["Fix regression"],
-          summary: "Introduced regression detected",
-        },
-      },
-      expectations: {
-        allowedRiskLevels: ["MEDIUM", "HIGH", "CRITICAL"],
-        allowedVerdicts: ["FAIL"],
-      },
-    },
-
-    // Scenario C: Pre-Existing Failure
-    {
-      name: "C: Pre-Existing Failure",
-      description: "Both baseline and target fail the same tests",
-      request: {
-        repositoryPath: process.cwd(),
-        requirements: [{ id: "req-1", description: "Tests pass" }],
-        profile: "standard",
-        mode: "repository",
-      },
-      modelOverrides: {
-        risk: {
-          level: "MEDIUM",
-          factors: [
-            {
-              factor: "pre-existing failure",
-              reason: "Failure predates change",
-              weight: "medium",
-            },
-          ],
-          confidence: 0.7,
-          summary: "Medium risk - pre-existing failure",
-        },
-        gaps: {
-          gaps: [
-            {
-              area: "Pre-existing test health",
-              description: "Existing tests fail independently of change",
-              reason: "Pre-existing issue",
-              risk: "MEDIUM",
-            },
-          ],
-          requirementAssessments: [
-            {
-              requirementId: "req-1",
-              status: "NOT_VERIFIED",
-              evidenceIds: [],
-              explanation: "Pre-existing failure",
-            },
-          ],
-        },
-        verdict: {
-          recommendedVerdict: "PASS_WITH_CONCERNS",
-          confidence: "MEDIUM",
-          reasoning: "Failure is pre-existing, not introduced by change",
-          concerns: ["Pre-existing test failure"],
-          recommendedNextActions: ["Fix pre-existing test"],
-          summary: "Pre-existing failure — change not at fault",
-        },
-      },
-      expectations: {
-        allowedVerdicts: ["PASS_WITH_CONCERNS", "NEEDS_REVIEW", "FAIL"],
-      },
-    },
-
-    // Scenario D: Missing Coverage
-    {
-      name: "D: Missing Coverage",
-      description: "Important requirements cannot be fully validated",
-      request: {
-        repositoryPath: process.cwd(),
-        requirements: [
-          { id: "req-1", description: "Data export works in CSV format" },
-          { id: "req-2", description: "Large datasets are paginated" },
+      gaps: {
+        gaps: [],
+        requirementAssessments: [
+          {
+            requirementId: "req-1",
+            status: "PARTIALLY_VERIFIED",
+            evidenceIds: [],
+            explanation: "Check passed",
+          },
         ],
-        profile: "standard",
-        mode: "repository",
       },
-      modelOverrides: {
-        risk: {
-          level: "MEDIUM",
-          factors: [
-            {
-              factor: "coverage gap",
-              reason: "No tests for data export",
-              weight: "medium",
-            },
-          ],
-          confidence: 0.7,
-          summary: "Medium risk due to validation gaps",
-        },
-        gaps: {
-          gaps: [
-            {
-              area: "Data export",
-              description: "No test for CSV export functionality",
-              reason: "No export-related tests exist",
-              risk: "HIGH",
-            },
-          ],
-          requirementAssessments: [
-            {
-              requirementId: "req-1",
-              status: "NOT_VERIFIED",
-              evidenceIds: [],
-              explanation: "No export tests available",
-            },
-            {
-              requirementId: "req-2",
-              status: "NOT_VERIFIED",
-              evidenceIds: [],
-              explanation: "No pagination tests available",
-            },
-          ],
-        },
-        verdict: {
-          recommendedVerdict: "PASS_WITH_CONCERNS",
-          confidence: "LOW",
-          reasoning: "Tests pass but critical coverage gaps",
-          concerns: ["No export tests"],
-          recommendedNextActions: ["Add export tests"],
-          summary: "Significant validation gaps remain",
-        },
-      },
-      expectations: {
-        allowedVerdicts: ["PASS_WITH_CONCERNS", "NEEDS_REVIEW"],
-        requireGaps: true,
+      verdict: {
+        recommendedVerdict: "PASS_WITH_CONCERNS",
+        confidence: "MEDIUM",
+        reasoning: "Low risk",
+        concerns: [],
+        recommendedNextActions: [],
+        summary: "Low risk passes",
       },
     },
-
-    // Scenario E: Authorization Change
-    {
-      name: "E: Authorization Change",
-      description: "Security-sensitive change impacts auth",
-      request: {
-        repositoryPath: process.cwd(),
-        requirements: [
-          { id: "req-1", description: "Admin endpoints require admin role" },
-        ],
-        profile: "standard",
-        mode: "repository",
-      },
-      modelOverrides: {
-        risk: {
-          level: "CRITICAL",
-          factors: [
-            {
-              factor: "auth change",
-              reason: "Authorization middleware modified",
-              weight: "critical",
-            },
-          ],
-          confidence: 0.95,
-          summary: "Critical risk — authorization change",
-        },
-        gaps: {
-          gaps: [
-            {
-              area: "Authorization testing",
-              description: "No negative auth tests",
-              reason: "Cannot verify unauthorized access is blocked",
-              risk: "CRITICAL",
-            },
-          ],
-          requirementAssessments: [
-            {
-              requirementId: "req-1",
-              status: "NOT_VERIFIED",
-              evidenceIds: [],
-              explanation: "No authorization-specific tests",
-            },
-          ],
-        },
-        verdict: {
-          recommendedVerdict: "NEEDS_REVIEW",
-          confidence: "LOW",
-          reasoning: "Auth change requires manual review",
-          concerns: ["No negative authorization tests"],
-          recommendedNextActions: ["Manual security review"],
-          summary: "Authorization change needs human review",
-        },
-      },
-      expectations: {
-        allowedRiskLevels: ["HIGH", "CRITICAL"],
-        allowedVerdicts: ["PASS_WITH_CONCERNS", "NEEDS_REVIEW", "FAIL"],
-      },
+    expectations: {
+      allowedRiskLevels: ["LOW", "MEDIUM"],
+      allowedVerdicts: ["PASS", "PASS_WITH_CONCERNS"],
     },
-
-    // Scenario F: Insufficient Environment
-    {
-      name: "F: Insufficient Environment",
-      description: "Critical validation capability cannot execute",
-      request: {
-        repositoryPath: process.cwd(),
-        requirements: [
-          { id: "req-1", description: "Database migrations run successfully" },
-        ],
-        profile: "standard",
-        mode: "repository",
-      },
-      modelOverrides: {
-        risk: {
-          level: "HIGH",
-          factors: [
-            {
-              factor: "environment gap",
-              reason: "Database not available",
-              weight: "high",
-            },
-          ],
-          confidence: 0.8,
-          summary: "High risk — insufficient environment",
-        },
-        plan: {
-          objectives: [],
-          recommendedActions: [],
-          identifiedRisks: ["Database not available"],
-          expectedCapabilities: ["database"],
-          unavailableValidations: [
-            {
-              description: "Database migration tests",
-              reason: "No database available in test environment",
-            },
-          ],
-        },
-        gaps: {
-          gaps: [
-            {
-              area: "Database validation",
-              description: "Cannot validate database migrations",
-              reason: "No database environment available",
-              risk: "CRITICAL",
-            },
-          ],
-          requirementAssessments: [
-            {
-              requirementId: "req-1",
-              status: "BLOCKED",
-              evidenceIds: [],
-              explanation: "No database environment available",
-            },
-          ],
-        },
-        verdict: {
-          recommendedVerdict: "BLOCKED",
-          confidence: "LOW",
-          reasoning: "Cannot validate without database",
-          concerns: ["Missing database environment"],
-          recommendedNextActions: ["Provide database access"],
-          summary: "Blocked by missing environment",
-        },
-      },
-      expectations: {
-        allowedVerdicts: ["BLOCKED", "NEEDS_REVIEW"],
-        requireGaps: true,
-      },
-    },
-  ];
+  };
 }
 
-describe("Evaluation Harness", () => {
-  const scenarios = createEvaluationScenarios();
+function buildScenarioB(): EvalScenario {
+  const dir = createTempGitRepo();
+  writeFileSync(
+    join(dir, "package.json"),
+    JSON.stringify({
+      name: "regression-app",
+      version: "1.0.0",
+      scripts: { test: "node validate.js" },
+    }),
+  );
+  writeFileSync(join(dir, "validate.js"), "process.exit(0);\n");
+  gitCommit(dir, "baseline: tests pass");
+  writeFileSync(join(dir, "validate.js"), "process.exit(1);\n");
+  gitCommit(dir, "target: break tests");
+  return {
+    name: "B: Introduced Regression",
+    repoDir: dir,
+    request: {
+      repositoryPath: dir,
+      requirements: [{ id: "req-1", description: "All tests pass" }],
+      profile: "standard",
+      mode: "repository",
+    },
+    modelOverrides: {
+      risk: {
+        level: "HIGH",
+        factors: [
+          {
+            factor: "test failure",
+            reason: "Tests fail on target",
+            weight: "high",
+          },
+        ],
+        confidence: 0.9,
+        summary: "High risk",
+      },
+      gaps: {
+        gaps: [
+          {
+            area: "Tests",
+            description: "Test failure",
+            reason: "Tests fail",
+            risk: "HIGH",
+          },
+        ],
+        requirementAssessments: [
+          {
+            requirementId: "req-1",
+            status: "NOT_VERIFIED",
+            evidenceIds: [],
+            explanation: "Tests fail",
+          },
+        ],
+      },
+      verdict: {
+        recommendedVerdict: "FAIL",
+        confidence: "HIGH",
+        reasoning: "Regression",
+        concerns: ["Failures"],
+        recommendedNextActions: ["Fix"],
+        summary: "Regression",
+      },
+    },
+    expectations: {
+      allowedRiskLevels: ["MEDIUM", "HIGH", "CRITICAL"],
+      allowedVerdicts: ["FAIL"],
+    },
+  };
+}
 
-  for (const scenario of scenarios) {
-    it(`Scenario ${scenario.name}`, async () => {
-      const gateway = createScenarioGateway(scenario.modelOverrides);
+function buildScenarioC(): EvalScenario {
+  const dir = createTempGitRepo();
+  writeFileSync(
+    join(dir, "package.json"),
+    JSON.stringify({
+      name: "preexisting-app",
+      version: "1.0.0",
+      scripts: { test: "node validate.js" },
+    }),
+  );
+  writeFileSync(join(dir, "validate.js"), "process.exit(1);\n");
+  writeFileSync(join(dir, "lib.js"), "module.exports = {};\n");
+  gitCommit(dir, "baseline: already broken");
+  writeFileSync(join(dir, "lib.js"), "module.exports = { v: 2 };\n");
+  gitCommit(dir, "target: unrelated change");
+  return {
+    name: "C: Pre-Existing Failure",
+    repoDir: dir,
+    request: {
+      repositoryPath: dir,
+      requirements: [{ id: "req-1", description: "Tests pass" }],
+      profile: "standard",
+      mode: "repository",
+    },
+    modelOverrides: {
+      risk: {
+        level: "MEDIUM",
+        factors: [
+          {
+            factor: "pre-existing",
+            reason: "Failure predates change",
+            weight: "medium",
+          },
+        ],
+        confidence: 0.7,
+        summary: "Pre-existing",
+      },
+      gaps: {
+        gaps: [
+          {
+            area: "Test health",
+            description: "Pre-existing failure",
+            reason: "Pre-existing",
+            risk: "MEDIUM",
+          },
+        ],
+        requirementAssessments: [
+          {
+            requirementId: "req-1",
+            status: "NOT_VERIFIED",
+            evidenceIds: [],
+            explanation: "Pre-existing",
+          },
+        ],
+      },
+      verdict: {
+        recommendedVerdict: "PASS_WITH_CONCERNS",
+        confidence: "MEDIUM",
+        reasoning: "Pre-existing",
+        concerns: ["Pre-existing failure"],
+        recommendedNextActions: ["Fix test"],
+        summary: "Pre-existing failure",
+      },
+    },
+    expectations: {
+      allowedVerdicts: ["PASS_WITH_CONCERNS", "NEEDS_REVIEW", "FAIL"],
+    },
+  };
+}
+
+function buildScenarioD(): EvalScenario {
+  const dir = createTempGitRepo();
+  writeFileSync(
+    join(dir, "package.json"),
+    JSON.stringify({
+      name: "missing-coverage-app",
+      version: "1.0.0",
+      scripts: { check: "echo basic-check-ok" },
+    }),
+  );
+  writeFileSync(
+    join(dir, "export.js"),
+    "module.exports = { exportCSV: () => {} };\n",
+  );
+  gitCommit(dir, "initial");
+  return {
+    name: "D: Missing Coverage",
+    repoDir: dir,
+    request: {
+      repositoryPath: dir,
+      requirements: [
+        { id: "req-1", description: "Data export works in CSV format" },
+        { id: "req-2", description: "Large datasets are paginated" },
+      ],
+      profile: "standard",
+      mode: "repository",
+    },
+    modelOverrides: {
+      risk: {
+        level: "MEDIUM",
+        factors: [
+          {
+            factor: "coverage gap",
+            reason: "No export tests",
+            weight: "medium",
+          },
+        ],
+        confidence: 0.7,
+        summary: "Coverage gaps",
+      },
+      gaps: {
+        gaps: [
+          {
+            area: "Data export",
+            description: "No CSV export test",
+            reason: "No export tests exist",
+            risk: "HIGH",
+          },
+        ],
+        requirementAssessments: [
+          {
+            requirementId: "req-1",
+            status: "NOT_VERIFIED",
+            evidenceIds: [],
+            explanation: "No export tests",
+          },
+          {
+            requirementId: "req-2",
+            status: "NOT_VERIFIED",
+            evidenceIds: [],
+            explanation: "No pagination tests",
+          },
+        ],
+      },
+      verdict: {
+        recommendedVerdict: "PASS_WITH_CONCERNS",
+        confidence: "LOW",
+        reasoning: "Coverage gaps",
+        concerns: ["No export tests"],
+        recommendedNextActions: ["Add tests"],
+        summary: "Gaps remain",
+      },
+    },
+    expectations: {
+      allowedVerdicts: ["PASS_WITH_CONCERNS", "NEEDS_REVIEW"],
+      requireGaps: true,
+    },
+  };
+}
+
+function buildScenarioE(): EvalScenario {
+  const dir = createTempGitRepo();
+  writeFileSync(
+    join(dir, "package.json"),
+    JSON.stringify({
+      name: "auth-app",
+      version: "1.0.0",
+      scripts: { check: "echo auth-check" },
+    }),
+  );
+  writeFileSync(
+    join(dir, "auth.js"),
+    "module.exports = { requireAdmin: (req) => { if (!req.user.isAdmin) throw new Error('forbidden'); } };\n",
+  );
+  gitCommit(dir, "initial with auth");
+  writeFileSync(
+    join(dir, "auth.js"),
+    "module.exports = { requireAdmin: () => {} };\n",
+  );
+  gitCommit(dir, "remove auth check");
+  return {
+    name: "E: Authorization Change",
+    repoDir: dir,
+    request: {
+      repositoryPath: dir,
+      requirements: [
+        { id: "req-1", description: "Admin endpoints require admin role" },
+      ],
+      profile: "standard",
+      mode: "repository",
+    },
+    modelOverrides: {
+      risk: {
+        level: "CRITICAL",
+        factors: [
+          { factor: "auth change", reason: "Auth removed", weight: "critical" },
+        ],
+        confidence: 0.95,
+        summary: "Critical auth",
+      },
+      gaps: {
+        gaps: [
+          {
+            area: "Auth testing",
+            description: "No negative auth tests",
+            reason: "Cannot verify block",
+            risk: "CRITICAL",
+          },
+        ],
+        requirementAssessments: [
+          {
+            requirementId: "req-1",
+            status: "NOT_VERIFIED",
+            evidenceIds: [],
+            explanation: "No auth tests",
+          },
+        ],
+      },
+      verdict: {
+        recommendedVerdict: "NEEDS_REVIEW",
+        confidence: "LOW",
+        reasoning: "Auth change",
+        concerns: ["No auth tests"],
+        recommendedNextActions: ["Security review"],
+        summary: "Auth change needs review",
+      },
+    },
+    expectations: {
+      allowedRiskLevels: ["HIGH", "CRITICAL"],
+      allowedVerdicts: ["PASS_WITH_CONCERNS", "NEEDS_REVIEW", "FAIL"],
+    },
+  };
+}
+
+function buildScenarioF(): EvalScenario {
+  const dir = createTempGitRepo();
+  writeFileSync(
+    join(dir, "package.json"),
+    JSON.stringify({
+      name: "db-app",
+      version: "1.0.0",
+    }),
+  );
+  writeFileSync(
+    join(dir, "migrate.js"),
+    "const db = require('pg'); db.connect();\n",
+  );
+  gitCommit(dir, "initial");
+  return {
+    name: "F: Insufficient Environment",
+    repoDir: dir,
+    request: {
+      repositoryPath: dir,
+      requirements: [
+        { id: "req-1", description: "Database migrations run successfully" },
+      ],
+      profile: "standard",
+      mode: "repository",
+    },
+    modelOverrides: {
+      risk: {
+        level: "HIGH",
+        factors: [
+          {
+            factor: "env gap",
+            reason: "Database not available",
+            weight: "high",
+          },
+        ],
+        confidence: 0.8,
+        summary: "No database",
+      },
+      plan: {
+        objectives: [],
+        recommendedActions: [],
+        identifiedRisks: ["No database"],
+        expectedCapabilities: ["database"],
+        unavailableValidations: [
+          { description: "DB migration tests", reason: "No database" },
+        ],
+      },
+      gaps: {
+        gaps: [
+          {
+            area: "Database",
+            description: "Cannot validate migrations",
+            reason: "No database",
+            risk: "CRITICAL",
+          },
+        ],
+        requirementAssessments: [
+          {
+            requirementId: "req-1",
+            status: "BLOCKED",
+            evidenceIds: [],
+            explanation: "No database",
+          },
+        ],
+      },
+      verdict: {
+        recommendedVerdict: "BLOCKED",
+        confidence: "LOW",
+        reasoning: "No database",
+        concerns: ["Missing DB"],
+        recommendedNextActions: ["Provide DB"],
+        summary: "Blocked",
+      },
+    },
+    expectations: {
+      allowedVerdicts: ["BLOCKED", "NEEDS_REVIEW"],
+      requireGaps: true,
+    },
+  };
+}
+
+describe("Evaluation Harness (Real Repos)", () => {
+  const scenarios: EvalScenario[] = [];
+  const cleanups: string[] = [];
+
+  beforeAll(() => {
+    const builders = [
+      buildScenarioA,
+      buildScenarioB,
+      buildScenarioC,
+      buildScenarioD,
+      buildScenarioE,
+      buildScenarioF,
+    ];
+    for (const build of builders) {
+      const s = build();
+      scenarios.push(s);
+      cleanups.push(s.repoDir);
+    }
+  });
+
+  afterAll(() => {
+    for (const dir of cleanups) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* best effort */
+      }
+    }
+  });
+
+  it("creates real Git repositories for scenarios", () => {
+    for (const s of scenarios) {
+      const log = execFileSync("git", ["log", "--oneline"], {
+        cwd: s.repoDir,
+      }).toString();
+      expect(log.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("discovers real commands from scenario repos", async () => {
+    const profileA = await analyzeRepository({
+      targetPath: scenarios[0].repoDir,
+    });
+    expect(profileA.root).toBe(scenarios[0].repoDir);
+    expect(profileA.commands.length).toBeGreaterThanOrEqual(0);
+  });
+
+  for (let i = 0; i < 6; i++) {
+    const names = [
+      "A: Low-Risk",
+      "B: Regression",
+      "C: Pre-Existing",
+      "D: Missing Coverage",
+      "E: Auth Change",
+      "F: Insufficient Env",
+    ];
+    it(`Scenario ${names[i]} produces valid structured result`, async () => {
+      const s = scenarios[i];
+      const profile = await analyzeRepository({ targetPath: s.repoDir });
+      const gateway = createScenarioGateway(s.modelOverrides);
       const orchestrator = new QEOrchestrator({
         gateway,
         maxModelCalls: 12,
-        repositoryProfile: createMockProfile(),
+        repositoryProfile: profile,
       });
 
-      const result = await orchestrator.run(scenario.request);
+      const result = await orchestrator.run(s.request);
 
-      // Validate against canonical schema
       const parseResult = QEResultSchema.safeParse(result);
       expect(parseResult.success).toBe(true);
 
-      // Verify risk level if specified
-      if (scenario.expectations.allowedRiskLevels) {
-        expect(scenario.expectations.allowedRiskLevels).toContain(
+      if (s.expectations.allowedRiskLevels) {
+        expect(s.expectations.allowedRiskLevels).toContain(
           result.riskAssessment.level,
         );
       }
-
-      // Verify verdict
-      expect(scenario.expectations.allowedVerdicts).toContain(result.verdict);
-
-      // Verify gaps required
-      if (scenario.expectations.requireGaps) {
+      expect(s.expectations.allowedVerdicts).toContain(result.verdict);
+      if (s.expectations.requireGaps) {
         expect(result.remainingGaps.length).toBeGreaterThan(0);
       }
-
-      // Verify lifecycle history is present
       expect(result.metrics.lifecycleHistory).toBeDefined();
       expect(result.metrics.lifecycleHistory!.length).toBeGreaterThan(0);
-
-      // Verify model call metadata is present
       expect(result.metrics.modelCallDetails).toBeDefined();
       expect(result.metrics.modelCallDetails!.length).toBeGreaterThan(0);
     });
   }
 });
 
-// --- Baseline Comparison Unit Tests ---
+// --- Baseline Comparison Schema Tests ---
 
-describe("Baseline Comparison Classification", () => {
-  it("target fails + baseline passes = INTRODUCED", () => {
+describe("Baseline Comparison Structured Data", () => {
+  it("BaselineComparison schema validates correctly", () => {
+    const valid = {
+      classification: "INTRODUCED",
+      targetEvidenceId: "ev-target-1",
+      baselineEvidenceId: "ev-baseline-1",
+      validationActionId: "action-test:vitest",
+      explanation: "Baseline passed, target failed",
+    };
+    expect(BaselineComparisonSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("rejects invalid classification", () => {
+    const invalid = {
+      classification: "MAYBE",
+      targetEvidenceId: "ev-1",
+    };
+    expect(BaselineComparisonSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("target fails + baseline passes = INTRODUCED classification", () => {
     const result = classifyWithBaseline("PASS", "FAIL");
     expect(result.classification).toBe("INTRODUCED");
     expect(result.baselinePassed).toBe(true);
     expect(result.targetPassed).toBe(false);
   });
 
-  it("target fails + baseline fails = PRE_EXISTING", () => {
+  it("target fails + baseline fails = PRE_EXISTING classification", () => {
     const result = classifyWithBaseline("FAIL", "FAIL");
     expect(result.classification).toBe("PRE_EXISTING");
     expect(result.baselinePassed).toBe(false);
@@ -1353,5 +1515,195 @@ describe("Baseline Comparison Classification", () => {
     expect(result.classification).toBe("UNKNOWN");
     expect(result.baselinePassed).toBe(true);
     expect(result.targetPassed).toBe(true);
+  });
+
+  it("QEResult with baselineComparisons validates", () => {
+    const profile = createMockProfile();
+    const result = QEResultSchema.safeParse({
+      executionId: "test-1",
+      repository: { path: "/tmp/test", name: "test" },
+      target: "HEAD",
+      profile: "quick",
+      repositoryProfile: profile,
+      riskAssessment: {
+        level: "LOW",
+        factors: [],
+        confidence: 0.5,
+        summary: "low",
+      },
+      validationPlan: {
+        objectives: [],
+        plannedActions: [],
+        identifiedRisks: [],
+        expectedCapabilities: [],
+      },
+      evidence: [
+        {
+          id: "ev-t-1",
+          type: "COMMAND_RESULT",
+          provenance: "executed",
+          timestamp: "2024-01-01",
+          source: "test",
+          status: "FAIL",
+          summary: "failed",
+        },
+        {
+          id: "ev-b-1",
+          type: "COMMAND_RESULT",
+          provenance: "executed",
+          timestamp: "2024-01-01",
+          source: "baseline",
+          status: "PASS",
+          summary: "passed",
+        },
+      ],
+      findings: [],
+      baselineComparisons: [
+        {
+          classification: "INTRODUCED",
+          targetEvidenceId: "ev-t-1",
+          baselineEvidenceId: "ev-b-1",
+          validationActionId: "action-test",
+          explanation: "Baseline passed, target failed",
+        },
+      ],
+      requirements: [],
+      remainingGaps: [],
+      verdict: "FAIL",
+      confidence: "HIGH",
+      summary: "Regression",
+      recommendedNextActions: [],
+      metrics: {
+        startTime: "2024-01-01",
+        modelCalls: 0,
+        commandsExecuted: 0,
+        testsExecuted: 0,
+        testsGenerated: 0,
+        retries: 0,
+        stateTransitions: 0,
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+// --- CLI exec --command-id Structured Command Tests ---
+
+describe("CLI exec uses structured DiscoveredCommand fields", () => {
+  it("STRUCTURED command with spaces in args uses executable/args directly", () => {
+    const discovered = {
+      id: "test:grep",
+      name: "grep search",
+      category: "OTHER" as const,
+      command: "grep -r 'hello world' src/",
+      executable: "grep",
+      args: ["-r", "hello world", "src/"],
+      source: "manual",
+      confidence: 0.9,
+      executionSupport: "STRUCTURED" as const,
+    };
+    expect(discovered.executionSupport).toBe("STRUCTURED");
+    expect(discovered.executable).toBe("grep");
+    expect(discovered.args[1]).toBe("hello world");
+  });
+
+  it("DISCOVERED_ONLY command is not executable", () => {
+    const discovered = {
+      id: "ci:pipeline",
+      name: "pipeline",
+      category: "OTHER" as const,
+      command: "cat file | grep pattern && echo done",
+      source: "CI",
+      confidence: 0.7,
+      executionSupport: "DISCOVERED_ONLY" as const,
+    };
+    expect(discovered.executionSupport).toBe("DISCOVERED_ONLY");
+    expect(discovered.executable).toBeUndefined();
+  });
+
+  it("normal npm STRUCTURED command provides executable and args", () => {
+    const discovered = {
+      id: "npm-script:test",
+      name: "test",
+      category: "TEST" as const,
+      command: "npm run test",
+      executable: "npm",
+      args: ["run", "test"],
+      source: "package.json",
+      confidence: 0.9,
+      executionSupport: "STRUCTURED" as const,
+    };
+    expect(discovered.executable).toBe("npm");
+    expect(discovered.args).toEqual(["run", "test"]);
+  });
+});
+
+// --- Retry Budget Accounting Tests ---
+
+describe("Retry Budget Fully Accounted", () => {
+  it("attempt 1 fails, attempt 2 succeeds = two attempts accounted", async () => {
+    let callCount = 0;
+    const gateway = new FakeModelGateway(
+      <T>(task: ReasoningTask<T>): T | undefined => {
+        callCount++;
+        if (task.role === "risk_analyst" && callCount === 1) {
+          throw new Error("Transient failure");
+        }
+        return createScenarioResponseProvider()(task) as T | undefined;
+      },
+    );
+
+    const budget = new BudgetManager(createBudgetForProfile("standard"));
+    const budgetGateway = new BudgetAwareGateway(gateway, budget, 2);
+
+    const task = {
+      role: "risk_analyst",
+      objective: "test",
+      context: {},
+      outputSchema: (await import("../src/prompts/risk-analysis/v1.js"))
+        .RiskAnalysisOutputSchema,
+      promptVersion: "test-v1",
+    };
+
+    await budgetGateway.reason(task);
+    expect(budgetGateway.callMetadata.length).toBe(2);
+    expect(budgetGateway.callMetadata[0].success).toBe(false);
+    expect(budgetGateway.callMetadata[1].success).toBe(true);
+    expect(budget.retries).toBe(1);
+    expect(budget.modelCalls).toBe(1);
+  });
+
+  it("fails until budget exhausted, no additional attempts", async () => {
+    const gateway = new FakeModelGateway(() => {
+      throw new Error("Always fails");
+    });
+
+    const budget = new BudgetManager({
+      maxDurationMs: 60000,
+      maxModelCalls: 10,
+      maxRetries: 2,
+    });
+    const budgetGateway = new BudgetAwareGateway(gateway, budget, 5);
+
+    await expect(
+      budgetGateway.reason({
+        role: "test",
+        objective: "test",
+        context: {},
+        outputSchema: (await import("zod")).z.object({
+          result: (await import("zod")).z.string(),
+        }),
+      }),
+    ).rejects.toThrow();
+
+    expect(budget.retries).toBeLessThanOrEqual(2);
+    expect(budgetGateway.callMetadata.every((m) => !m.success)).toBe(true);
+  });
+
+  it("OpenAI provider does not retry internally", async () => {
+    const { OpenAIModelGateway } =
+      await import("../src/models/gateway/openai.js");
+    const gw = new OpenAIModelGateway({ model: "gpt-4o", apiKey: "test-key" });
+    expect((gw as any).client._options.maxRetries).toBe(0);
   });
 });

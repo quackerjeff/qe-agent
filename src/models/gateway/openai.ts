@@ -5,7 +5,6 @@ export interface OpenAIProviderConfig {
   model: string;
   apiKey?: string;
   baseURL?: string;
-  maxRetries?: number;
   temperature?: number;
 }
 
@@ -25,77 +24,67 @@ export interface ModelCallRecord {
 export class OpenAIModelGateway implements ModelGateway {
   private readonly client: OpenAI;
   private readonly model: string;
-  private readonly maxRetries: number;
   private readonly temperature: number;
   public readonly callLog: ModelCallRecord[] = [];
 
   constructor(config: OpenAIProviderConfig) {
     this.model = config.model;
-    this.maxRetries = config.maxRetries ?? 2;
     this.temperature = config.temperature ?? 0.1;
     this.client = new OpenAI({
       apiKey: config.apiKey ?? process.env.OPENAI_API_KEY,
       baseURL: config.baseURL,
+      maxRetries: 0,
     });
   }
 
   async reason<T>(task: ReasoningTask<T>): Promise<ModelResult<T>> {
     const startedAt = new Date().toISOString();
-    const overallStart = Date.now();
-    let lastError: Error | undefined;
-    let retryCount = 0;
+    const start = Date.now();
 
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-      const attemptStart = Date.now();
+    try {
+      const result = await this.attempt(task);
+      const durationMs = Date.now() - start;
 
-      try {
-        const result = await this.attempt(task);
+      const finalResult: ModelResult<T> = {
+        ...result,
+        provider: "openai",
+        startedAt,
+        retryCount: 0,
+        promptVersion: task.promptVersion ?? "unknown",
+      };
 
-        const finalResult: ModelResult<T> = {
-          ...result,
-          provider: "openai",
-          startedAt,
-          retryCount,
-          promptVersion: task.promptVersion ?? "unknown",
-        };
+      this.callLog.push({
+        role: task.role,
+        provider: "openai",
+        model: this.model,
+        durationMs,
+        promptTokens: result.usage.promptTokens,
+        completionTokens: result.usage.completionTokens,
+        totalTokens: result.usage.totalTokens,
+        success: true,
+        retryCount: 0,
+      });
 
-        this.callLog.push({
-          role: task.role,
-          provider: "openai",
-          model: this.model,
-          durationMs: Date.now() - overallStart,
-          promptTokens: result.usage.promptTokens,
-          completionTokens: result.usage.completionTokens,
-          totalTokens: result.usage.totalTokens,
-          success: true,
-          retryCount,
-        });
+      return finalResult;
+    } catch (err) {
+      const lastError = err instanceof Error ? err : new Error(String(err));
+      const durationMs = Date.now() - start;
 
-        return finalResult;
-      } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err));
-        const durationMs = Date.now() - attemptStart;
+      this.callLog.push({
+        role: task.role,
+        provider: "openai",
+        model: this.model,
+        durationMs,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        success: false,
+        retryCount: 0,
+        error: lastError.message,
+      });
 
-        this.callLog.push({
-          role: task.role,
-          provider: "openai",
-          model: this.model,
-          durationMs,
-          promptTokens: 0,
-          completionTokens: 0,
-          totalTokens: 0,
-          success: false,
-          retryCount: attempt,
-          error: lastError.message,
-        });
-
-        if (attempt < this.maxRetries) {
-          retryCount++;
-        }
-      }
+      throw lastError;
     }
-
-    throw lastError ?? new Error("Model call failed after retries");
   }
 
   private async attempt<T>(

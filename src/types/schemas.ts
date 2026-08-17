@@ -279,6 +279,23 @@ export const ModelCallMetadataSchema = z.object({
 });
 export type ModelCallMetadata = z.infer<typeof ModelCallMetadataSchema>;
 
+export const BaselineComparisonClassification = z.enum([
+  "INTRODUCED",
+  "PRE_EXISTING",
+  "ENVIRONMENT_SPECIFIC",
+  "FLAKY",
+  "UNKNOWN",
+]);
+
+export const BaselineComparisonSchema = z.object({
+  classification: BaselineComparisonClassification,
+  targetEvidenceId: z.string().min(1),
+  baselineEvidenceId: z.string().optional(),
+  validationActionId: z.string().optional(),
+  explanation: z.string().optional(),
+});
+export type BaselineComparison = z.infer<typeof BaselineComparisonSchema>;
+
 export const ExecutionMetricsSchema = z.object({
   startTime: z.string(),
   endTime: z.string().optional(),
@@ -316,6 +333,7 @@ export const QEResultSchema = z.object({
   validationPlan: ValidationPlanSchema,
   evidence: z.array(EvidenceSchema),
   findings: z.array(FindingSchema),
+  baselineComparisons: z.array(BaselineComparisonSchema).optional(),
   requirements: z.array(RequirementAssessmentSchema),
   remainingGaps: z.array(QualityGapSchema),
   verdict: Verdict,
@@ -341,6 +359,7 @@ export const PartialQEResultSchema = z.object({
   validationPlan: ValidationPlanSchema.optional(),
   evidence: z.array(EvidenceSchema),
   findings: z.array(FindingSchema),
+  baselineComparisons: z.array(BaselineComparisonSchema).optional(),
   requirements: z.array(RequirementAssessmentSchema),
   remainingGaps: z.array(QualityGapSchema),
   verdict: Verdict.optional(),

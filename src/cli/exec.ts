@@ -64,17 +64,23 @@ export async function runExec(
       process.exit(1);
     }
 
-    const parsed = parseSimpleCommand(discovered.command);
-    if (!parsed) {
+    if (discovered.executionSupport !== "STRUCTURED") {
       effectiveLogger.error(
-        `Command '${discovered.command}' contains shell syntax that cannot be safely split into executable + arguments. Use --command and --arg instead.`,
+        `Command '${discovered.id}' is DISCOVERED_ONLY and cannot be safely executed. Use --command and --arg to supply a structured command.`,
+      );
+      process.exit(1);
+    }
+
+    if (!discovered.executable) {
+      effectiveLogger.error(
+        `Command '${discovered.id}' has no structured executable. Use --command and --arg instead.`,
       );
       process.exit(1);
     }
 
     proposal = {
-      executable: parsed.executable,
-      args: parsed.args,
+      executable: discovered.executable,
+      args: discovered.args ?? [],
       workingDirectory: profile.root,
       timeoutMs,
       purpose: `Execute discovered command: ${discovered.name}`,
@@ -136,18 +142,6 @@ export async function runExec(
   if (result.terminationReason !== "COMPLETED") {
     process.exit(1);
   }
-}
-
-const SHELL_METACHARACTERS = /[;|&$`"'\\<>(){}!\n*?~#]/;
-
-function parseSimpleCommand(
-  cmd: string,
-): { executable: string; args: string[] } | null {
-  const trimmed = cmd.trim();
-  if (SHELL_METACHARACTERS.test(trimmed)) return null;
-  const parts = trimmed.split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return null;
-  return { executable: parts[0], args: parts.slice(1) };
 }
 
 function validateMode(mode: string): "local" | "docker" | "auto" {

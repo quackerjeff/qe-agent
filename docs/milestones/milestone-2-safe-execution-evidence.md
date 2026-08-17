@@ -1,8 +1,9 @@
 # Implementation Assignment — Milestone 2: Safe Execution & Evidence
 
 **Milestone:** 2  
-**Status:** Accepted for Implementation  
+**Status:** Accepted  
 **Depends On:** Milestone 1  
+**Accepted:** 2026-08-17  
 **Objective:** Introduce controlled command execution and immutable evidence capture without autonomous QE reasoning.
 
 # Required Reading
