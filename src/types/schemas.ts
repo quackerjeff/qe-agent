@@ -253,6 +253,10 @@ export const ExecutionBudgetSchema = z.object({
   maxModelCalls: z.number().positive().optional(),
   maxRetries: z.number().nonnegative().optional(),
   maxGeneratedTests: z.number().nonnegative().optional(),
+  maxBrowserScenarios: z.number().nonnegative().optional(),
+  maxBrowserActions: z.number().nonnegative().optional(),
+  maxBrowserDurationMs: z.number().nonnegative().optional(),
+  maxScreenshots: z.number().nonnegative().optional(),
 });
 export type ExecutionBudget = z.infer<typeof ExecutionBudgetSchema>;
 

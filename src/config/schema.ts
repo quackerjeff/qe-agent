@@ -30,6 +30,9 @@ export const QEConfigSchema = z.object({
   browser: z
     .object({
       enabled: z.union([z.literal("auto"), z.boolean()]).default("auto"),
+      baseUrl: z.string().optional(),
+      allowedOrigins: z.array(z.string()).optional(),
+      headless: z.boolean().default(true),
     })
     .default({}),
 

@@ -17,6 +17,7 @@ These documents are historical implementation records.
 - Milestone 2 — Safe Execution & Evidence: Accepted.
 - Milestone 3 — QE Reasoning: Accepted.
 - Milestone 4 — Test Generation & Retesting: Corrections Complete.
+- Milestone 5 — Browser QE & Playwright: Accepted.
 
 The Product Requirements, Technical Product Specification, AGENTS.md,
 and accepted ADRs remain the authoritative architectural and product

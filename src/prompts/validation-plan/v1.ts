@@ -11,7 +11,7 @@ export const ValidationPlanOutputSchema = z.object({
   ),
   recommendedActions: z.array(
     z.object({
-      commandId: z.string(),
+      commandId: z.string().optional(),
       type: z.enum([
         "BUILD",
         "TEST",
@@ -27,6 +27,7 @@ export const ValidationPlanOutputSchema = z.object({
       priority: z.number().min(1).max(100),
       riskAddressed: z.array(z.string()),
       requirementIds: z.array(z.string()),
+      browserActions: z.array(z.record(z.unknown())).optional(),
     }),
   ),
   identifiedRisks: z.array(z.string()),

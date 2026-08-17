@@ -16,6 +16,7 @@ describe("QE lifecycle states", () => {
     "GENERATING_TESTS",
     "RETESTING",
     "ANALYZING_GAPS",
+    "BROWSER_VALIDATING",
     "FORMING_VERDICT",
     "REPORTING",
     "COMPLETE",

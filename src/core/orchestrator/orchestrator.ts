@@ -30,6 +30,8 @@ import {
   getCurrentRef,
   getFileDiff,
   executeBaselineComparison,
+  createWorktree,
+  cleanupWorktree,
   type GitDiffData,
 } from "../git/index.js";
 import { analyzeRepository } from "../../repository/index.js";
@@ -48,10 +50,26 @@ import {
   planValidation,
   applyProfileLimits,
 } from "../reasoning/validation-planner.js";
-import { investigateFailure } from "../reasoning/failure-investigator.js";
+import {
+  investigateFailure,
+  classifyWithBaseline,
+} from "../reasoning/failure-investigator.js";
 import { analyzeGaps } from "../reasoning/gap-analyzer.js";
 import { produceVerdict } from "../reasoning/verdict-engine.js";
 import { generateAndExecuteTests } from "../test-generation/index.js";
+import type { BrowserCapability } from "../browser/capability.js";
+import type {
+  BrowserScenario,
+  BrowserScenarioResult,
+  BrowserBudget,
+  BrowserExecutionContext,
+} from "../browser/types.js";
+import {
+  ManagedProcess,
+  type ManagedProcessOptions,
+} from "../browser/managed-process.js";
+import { investigateBrowserFailure } from "../browser/failure-investigator.js";
+import { validateBrowserActions } from "../browser/action-validator.js";
 
 export interface QEOrchestratorOptions {
   gateway: ModelGateway;
@@ -59,6 +77,13 @@ export interface QEOrchestratorOptions {
   maxModelCalls?: number;
   repositoryProfile?: RepositoryProfile;
   controller?: ExecutionController;
+  browserCapability?: BrowserCapability;
+  browserConfig?: {
+    enabled: "auto" | boolean;
+    baseUrl?: string;
+    allowedOrigins?: string[];
+    headless?: boolean;
+  };
 }
 
 export class QEOrchestrator {
@@ -67,6 +92,8 @@ export class QEOrchestrator {
   private readonly maxModelCalls?: number;
   private readonly injectedProfile?: RepositoryProfile;
   private readonly injectedController?: ExecutionController;
+  private readonly browserCapability?: BrowserCapability;
+  private readonly browserConfig?: QEOrchestratorOptions["browserConfig"];
 
   constructor(options: QEOrchestratorOptions) {
     this.gateway = options.gateway;
@@ -74,6 +101,8 @@ export class QEOrchestrator {
     this.maxModelCalls = options.maxModelCalls;
     this.injectedProfile = options.repositoryProfile;
     this.injectedController = options.controller;
+    this.browserCapability = options.browserCapability;
+    this.browserConfig = options.browserConfig;
   }
 
   async run(request: QERequest): Promise<QEResult> {
@@ -469,6 +498,484 @@ export class QEOrchestrator {
           evidenceIds: [],
           explanation: "Budget exhausted before gap analysis",
         }));
+      }
+
+      // BROWSER_VALIDATING (conditional)
+      const browserBudget: BrowserBudget = {
+        maxBrowserScenarios: budget.budget.maxBrowserScenarios ?? 0,
+        maxBrowserActions: budget.budget.maxBrowserActions ?? 0,
+        maxBrowserDurationMs: budget.budget.maxBrowserDurationMs ?? 0,
+        maxScreenshots: budget.budget.maxScreenshots ?? 0,
+      };
+
+      const browserEnabled = this.browserConfig?.enabled ?? "auto";
+      const hasBrowserCapability = this.browserCapability != null;
+      const hasBrowserBudget = browserBudget.maxBrowserScenarios > 0;
+      const hasBrowserActions = (validationPlan?.plannedActions ?? []).some(
+        (a) => a.type === "BROWSER",
+      );
+
+      const shouldRunBrowser =
+        hasBrowserCapability &&
+        hasBrowserBudget &&
+        browserEnabled !== false &&
+        (browserEnabled === true || hasBrowserActions) &&
+        sm.canTransitionTo("BROWSER_VALIDATING");
+
+      if (shouldRunBrowser && this.browserCapability) {
+        sm.transition("BROWSER_VALIDATING", "Execute browser validation");
+        this.logger?.info("Running browser validation", {
+          executionId,
+          state: sm.state,
+        });
+
+        const browserActions = (validationPlan?.plannedActions ?? []).filter(
+          (a) => a.type === "BROWSER",
+        );
+
+        let managedProcess: ManagedProcess | null = null;
+        const baseUrl = this.browserConfig?.baseUrl;
+        const allowedOrigins = this.browserConfig?.allowedOrigins ?? [];
+
+        try {
+          const startCommand = repositoryProfile?.commands.find(
+            (c) =>
+              c.category === "START" && c.executionSupport === "STRUCTURED",
+          );
+
+          let effectiveBaseUrl = baseUrl;
+
+          if (!effectiveBaseUrl && startCommand) {
+            const port = 3_100 + Math.floor(Math.random() * 900);
+            const processOptions: ManagedProcessOptions = {
+              executable:
+                startCommand.executable ?? startCommand.command.split(" ")[0],
+              args:
+                startCommand.args ?? startCommand.command.split(" ").slice(1),
+              cwd: request.repositoryPath,
+              port,
+              readinessTimeoutMs: 15_000,
+            };
+
+            managedProcess = new ManagedProcess(processOptions);
+            const startResult = await managedProcess.start();
+
+            if (startResult.started && startResult.ready) {
+              effectiveBaseUrl = `http://localhost:${port}`;
+              this.logger?.info("Application started for browser validation", {
+                executionId,
+                pid: startResult.info?.pid,
+                port,
+              });
+
+              evidence.push({
+                id: `browser-startup-${executionId}`,
+                type: "COMMAND_RESULT",
+                provenance: "executed",
+                timestamp: new Date().toISOString(),
+                source: `managed-process:${startCommand.command}`,
+                status: "PASS",
+                summary: `Application started on port ${port}`,
+                details: {
+                  pid: startResult.info?.pid,
+                  stdout: startResult.stdout.slice(-20),
+                },
+              });
+            } else {
+              evidence.push({
+                id: `browser-startup-fail-${executionId}`,
+                type: "COMMAND_RESULT",
+                provenance: "executed",
+                timestamp: new Date().toISOString(),
+                source: `managed-process:${startCommand.command}`,
+                status: "FAIL",
+                summary: `Application startup failed: ${startResult.error ?? "unknown"}`,
+                details: {
+                  stderr: startResult.stderr.slice(-20),
+                  stdout: startResult.stdout.slice(-20),
+                },
+              });
+
+              remainingGaps.push({
+                area: "browser-validation",
+                description:
+                  "Browser validation unavailable due to application startup failure",
+                reason: startResult.error ?? "Application failed to start",
+                risk: "MEDIUM",
+              });
+            }
+          }
+
+          if (effectiveBaseUrl) {
+            const browserCtx: BrowserExecutionContext = {
+              baseUrl: effectiveBaseUrl,
+              allowedOrigins,
+              repositoryRoot: request.repositoryPath,
+              artifactDir: `.qe/runs/${executionId}`,
+              budget: browserBudget,
+              secrets: [],
+              headless: this.browserConfig?.headless ?? true,
+            };
+
+            let scenariosExecuted = 0;
+            const failedBrowserScenarios: {
+              scenario: BrowserScenario;
+              result: BrowserScenarioResult;
+              evidenceEntry: Evidence;
+              actionId: string;
+            }[] = [];
+
+            for (const action of browserActions) {
+              if (scenariosExecuted >= browserBudget.maxBrowserScenarios) break;
+              if (!budget.canAffordExecution()) break;
+
+              const scenarioId = action.id ?? `browser-${scenariosExecuted}`;
+              const rawBrowserActions = (
+                action as ValidationAction & { browserActions?: unknown[] }
+              ).browserActions;
+
+              const resolvedActions = rawBrowserActions
+                ? rawBrowserActions.map((ba) => {
+                    const obj = ba as Record<string, unknown>;
+                    if (
+                      obj.type === "NAVIGATE" &&
+                      typeof obj.url === "string"
+                    ) {
+                      return {
+                        ...obj,
+                        url: obj.url.replace("__BASE_URL__", effectiveBaseUrl),
+                      };
+                    }
+                    return ba;
+                  })
+                : [];
+
+              const scenario: BrowserScenario = {
+                id: scenarioId,
+                objective: action.purpose,
+                requirementIds: action.requirementIds ?? [],
+                actions:
+                  resolvedActions.length > 0
+                    ? validateBrowserActions(resolvedActions, allowedOrigins)
+                        .valid
+                    : [],
+                baseUrl: effectiveBaseUrl,
+              };
+
+              if (scenario.actions.length === 0) continue;
+
+              const scenarioResult: BrowserScenarioResult =
+                await this.browserCapability.executeScenario(
+                  scenario,
+                  browserCtx,
+                );
+              scenariosExecuted++;
+              budget.recordExecution();
+
+              const browserEvidence: Evidence = {
+                id: `browser-${scenarioId}-${executionId}`,
+                type: "BROWSER_RESULT",
+                provenance: "executed",
+                timestamp: new Date().toISOString(),
+                source: `playwright:${scenarioId}`,
+                status: scenarioResult.status === "PASS" ? "PASS" : "FAIL",
+                summary: `Browser scenario ${scenarioId}: ${scenarioResult.status}`,
+                details: {
+                  scenarioResult,
+                  objective: scenario.objective,
+                },
+                relatedRequirementIds: scenario.requirementIds,
+                artifacts: scenarioResult.screenshots?.map((s) => ({
+                  path: s.path,
+                  type: "screenshot",
+                })),
+              };
+
+              evidence.push(browserEvidence);
+
+              if (scenarioResult.status === "FAIL") {
+                const failedActions = scenarioResult.actionResults.filter(
+                  (r) => r.status === "FAIL",
+                );
+                for (const failedAction of failedActions) {
+                  const passedBefore = scenarioResult.actionResults
+                    .slice(
+                      0,
+                      scenarioResult.actionResults.indexOf(failedAction),
+                    )
+                    .filter((a) => a.status !== "SKIPPED");
+
+                  const investigation = investigateBrowserFailure(
+                    scenarioResult,
+                    failedAction,
+                    passedBefore,
+                  );
+
+                  if (investigation.isProductDefect) {
+                    findings.push({
+                      id: `browser-finding-${scenarioId}-${Date.now()}`,
+                      category: "DEFECT",
+                      severity: "HIGH",
+                      confidence: 0.7,
+                      title: `Browser: ${failedAction.action.description ?? failedAction.action.type} failed`,
+                      description: investigation.explanation,
+                      evidenceIds: [browserEvidence.id],
+                      affectedFiles: [],
+                    });
+
+                    failedBrowserScenarios.push({
+                      scenario,
+                      result: scenarioResult,
+                      evidenceEntry: browserEvidence,
+                      actionId: action.id ?? scenarioId,
+                    });
+                  }
+                }
+              }
+            }
+
+            // Browser baseline comparison
+            if (
+              failedBrowserScenarios.length > 0 &&
+              request.mode === "change" &&
+              request.baselineRef &&
+              budget.canAffordExecution()
+            ) {
+              let baselineWorktree: string | undefined;
+              let baselineManagedProcess: ManagedProcess | null = null;
+
+              try {
+                baselineWorktree = await createWorktree(
+                  request.repositoryPath,
+                  request.baselineRef,
+                );
+                this.logger?.info("Created browser baseline worktree", {
+                  executionId,
+                  path: baselineWorktree,
+                  ref: request.baselineRef,
+                });
+
+                const baselineProfile = await analyzeRepository({
+                  targetPath: baselineWorktree,
+                });
+
+                const baselineStartCmd = baselineProfile.commands.find(
+                  (c) =>
+                    c.category === "START" &&
+                    c.executionSupport === "STRUCTURED",
+                );
+
+                let baselineBaseUrl: string | undefined;
+
+                if (baselineStartCmd) {
+                  const baselinePort = 3_100 + Math.floor(Math.random() * 900);
+                  baselineManagedProcess = new ManagedProcess({
+                    executable:
+                      baselineStartCmd.executable ??
+                      baselineStartCmd.command.split(" ")[0],
+                    args:
+                      baselineStartCmd.args ??
+                      baselineStartCmd.command.split(" ").slice(1),
+                    cwd: baselineWorktree,
+                    port: baselinePort,
+                    readinessTimeoutMs: 15_000,
+                  });
+
+                  const baselineStart = await baselineManagedProcess.start();
+                  if (baselineStart.started && baselineStart.ready) {
+                    baselineBaseUrl = `http://127.0.0.1:${baselinePort}`;
+                    this.logger?.info("Baseline app started", {
+                      executionId,
+                      port: baselinePort,
+                    });
+                  }
+                } else if (baseUrl) {
+                  baselineBaseUrl = baseUrl;
+                }
+
+                if (baselineBaseUrl && this.browserCapability) {
+                  const baselineCtx: BrowserExecutionContext = {
+                    baseUrl: baselineBaseUrl,
+                    allowedOrigins,
+                    repositoryRoot: baselineWorktree,
+                    artifactDir: `.qe/runs/${executionId}-baseline`,
+                    budget: browserBudget,
+                    secrets: [],
+                    headless: this.browserConfig?.headless ?? true,
+                  };
+
+                  const seen = new Set<string>();
+                  for (const failed of failedBrowserScenarios) {
+                    if (seen.has(failed.scenario.id)) continue;
+                    seen.add(failed.scenario.id);
+                    if (!budget.canAffordExecution()) break;
+
+                    const baselineScenario: BrowserScenario = {
+                      ...failed.scenario,
+                      id: `baseline-${failed.scenario.id}`,
+                      baseUrl: baselineBaseUrl,
+                      actions: failed.scenario.actions.map((a) =>
+                        a.type === "NAVIGATE" && a.url
+                          ? {
+                              ...a,
+                              url: a.url.replace(
+                                browserCtx.baseUrl,
+                                baselineBaseUrl!,
+                              ),
+                            }
+                          : a,
+                      ),
+                    };
+
+                    const baselineResult =
+                      await this.browserCapability.executeScenario(
+                        baselineScenario,
+                        baselineCtx,
+                      );
+                    budget.recordExecution();
+
+                    const baselineEvidence: Evidence = {
+                      id: `browser-baseline-${failed.scenario.id}-${executionId}`,
+                      type: "BROWSER_RESULT",
+                      provenance: "executed",
+                      timestamp: new Date().toISOString(),
+                      source: `playwright:baseline-${failed.scenario.id}`,
+                      status:
+                        baselineResult.status === "PASS" ? "PASS" : "FAIL",
+                      summary: `Baseline browser scenario ${failed.scenario.id}: ${baselineResult.status}`,
+                      details: {
+                        scenarioResult: baselineResult,
+                        objective: failed.scenario.objective,
+                      },
+                      relatedRequirementIds: failed.scenario.requirementIds,
+                    };
+
+                    evidence.push(baselineEvidence);
+
+                    const targetStatus =
+                      failed.result.status === "PASS" ? "PASS" : "FAIL";
+                    const baseStatus =
+                      baselineResult.status === "PASS" ? "PASS" : "FAIL";
+                    const comparison = classifyWithBaseline(
+                      baseStatus as "PASS" | "FAIL",
+                      targetStatus as "PASS" | "FAIL",
+                    );
+
+                    baselineComparisons.push({
+                      classification: comparison.classification as
+                        | "INTRODUCED"
+                        | "PRE_EXISTING"
+                        | "ENVIRONMENT_SPECIFIC"
+                        | "FLAKY"
+                        | "UNKNOWN",
+                      targetEvidenceId: failed.evidenceEntry.id,
+                      baselineEvidenceId: baselineEvidence.id,
+                      validationActionId: failed.actionId,
+                      explanation: `Baseline browser ${baseStatus}, target browser ${targetStatus}`,
+                    });
+
+                    if (comparison.classification === "INTRODUCED") {
+                      const relatedFinding = findings.find((f) =>
+                        f.evidenceIds.includes(failed.evidenceEntry.id),
+                      );
+                      if (relatedFinding) {
+                        relatedFinding.category = "REGRESSION";
+                      }
+                    }
+                  }
+
+                  await this.browserCapability.cleanup();
+                }
+              } catch (err) {
+                this.logger?.warn("Browser baseline comparison failed", {
+                  executionId,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              } finally {
+                if (baselineManagedProcess) {
+                  await baselineManagedProcess.stop();
+                }
+                if (baselineWorktree) {
+                  await cleanupWorktree(
+                    request.repositoryPath,
+                    baselineWorktree,
+                    this.logger,
+                  );
+                }
+              }
+            }
+
+            if (scenariosExecuted === 0 && browserActions.length > 0) {
+              remainingGaps.push({
+                area: "browser-validation",
+                description:
+                  "Browser scenarios planned but none could be executed",
+                reason: "No valid browser actions could be constructed",
+                risk: "MEDIUM",
+              });
+            }
+          } else if (!baseUrl && !startCommand) {
+            remainingGaps.push({
+              area: "browser-validation",
+              description: "Browser validation unavailable",
+              reason:
+                "No base URL configured and no startup command discovered",
+              risk: "LOW",
+            });
+          }
+        } catch (err) {
+          this.logger?.error("Browser validation failed", {
+            executionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          evidence.push({
+            id: `browser-error-${executionId}`,
+            type: "BROWSER_RESULT",
+            provenance: "executed",
+            timestamp: new Date().toISOString(),
+            source: "playwright",
+            status: "FAIL",
+            summary: `Browser validation error: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        } finally {
+          if (managedProcess) {
+            await managedProcess.stop();
+            const portFree = await managedProcess.isPortFree();
+            this.logger?.info("Managed process cleanup", {
+              executionId,
+              portFree,
+            });
+          }
+          await this.browserCapability.cleanup();
+        }
+
+        if (sm.canTransitionTo("ANALYZING_GAPS")) {
+          sm.transition(
+            "ANALYZING_GAPS",
+            "Re-analyze gaps after browser validation",
+          );
+
+          if (
+            budget.canAffordModelCall() &&
+            (request.requirements?.length ?? 0) > 0
+          ) {
+            const gapResult = await analyzeGaps(
+              budgetGateway,
+              request.requirements!,
+              evidence,
+              findings,
+              riskAssessment,
+              diffData ? { changedFiles: diffData.changedFiles } : undefined,
+            );
+            budget.recordModelCall();
+            remainingGaps = gapResult.gaps;
+            requirementAssessments = gapResult.requirementAssessments;
+            requirementAssessments = validateEvidenceReferences(
+              requirementAssessments,
+              evidence,
+            );
+          }
+        }
       }
 
       // GENERATING_TESTS (conditional)

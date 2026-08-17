@@ -143,7 +143,7 @@ export async function executeBaselineComparison(
   }
 }
 
-async function createWorktree(
+export async function createWorktree(
   repositoryPath: string,
   ref: string,
 ): Promise<string> {
@@ -157,7 +157,7 @@ async function createWorktree(
   return tempDir;
 }
 
-async function cleanupWorktree(
+export async function cleanupWorktree(
   repositoryPath: string,
   worktreePath: string,
   logger?: Logger,

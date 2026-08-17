@@ -39,12 +39,29 @@ export async function planValidation(
 
   const plannedActions: ValidationAction[] = output.recommendedActions
     .filter((a) => {
-      const cmd = commandMap.get(a.commandId);
+      if (a.type === "BROWSER") return true;
+      const cmd = a.commandId ? commandMap.get(a.commandId) : undefined;
       return cmd && cmd.executionSupport === "STRUCTURED" && cmd.executable;
     })
     .sort((a, b) => a.priority - b.priority)
     .map((a) => {
-      const cmd = commandMap.get(a.commandId)!;
+      if (a.type === "BROWSER") {
+        const action: ValidationAction & {
+          browserActions?: unknown[];
+        } = {
+          id: a.commandId ?? `browser-${Date.now()}`,
+          type: a.type,
+          purpose: a.purpose,
+          riskAddressed: a.riskAddressed,
+          requirementIds: a.requirementIds,
+          priority: a.priority,
+        };
+        if (a.browserActions) {
+          action.browserActions = a.browserActions;
+        }
+        return action as ValidationAction;
+      }
+      const cmd = commandMap.get(a.commandId!)!;
       return {
         id: `action-${a.commandId}`,
         type: a.type,
