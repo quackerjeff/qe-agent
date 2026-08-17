@@ -20,7 +20,9 @@ describe("QEConfig defaults", () => {
     expect(config.github.blockOnFail).toBe(true);
     expect(config.github.createIssues).toBe(true);
     expect(config.memory.enabled).toBe(true);
-    expect(config.model.provider).toBe("default");
+    expect(config.model.provider).toBe("openai");
+    expect(config.model.model).toBe("gpt-4o");
+    expect(config.reasoning.maxModelCalls).toBe(12);
   });
 
   it("fills defaults for omitted optional sections", () => {

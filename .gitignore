@@ -13,6 +13,8 @@ dist/
 build/
 *.tsbuildinfo
 
+vitest.config.ts.timestamp-*.mjs
+
 
 # =============================================================================
 # Test / coverage output

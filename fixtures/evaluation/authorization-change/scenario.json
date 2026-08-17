@@ -1,0 +1,9 @@
+{
+  "name": "authorization-change",
+  "description": "Change impacts authentication/authorization logic — requires elevated risk",
+  "mode": "change",
+  "profile": "standard",
+  "expectedRisk": ["HIGH", "CRITICAL"],
+  "expectedVerdict": ["PASS_WITH_CONCERNS", "NEEDS_REVIEW", "FAIL"],
+  "changeDescription": "Modify auth middleware affecting session validation"
+}

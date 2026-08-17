@@ -1,0 +1,11 @@
+{
+  "name": "low-risk-change",
+  "description": "A small formatting-only change with passing tests and lint",
+  "mode": "change",
+  "profile": "quick",
+  "expectedRisk": ["LOW", "MEDIUM"],
+  "expectedFindings": [],
+  "expectedGaps": [],
+  "expectedVerdict": ["PASS", "PASS_WITH_CONCERNS"],
+  "changeDescription": "Fix whitespace in a single source file"
+}

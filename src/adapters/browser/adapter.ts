@@ -98,8 +98,11 @@ export class BrowserAdapter implements EcosystemAdapter {
                 name,
                 category: "BROWSER",
                 command: `npm run ${name}`,
+                executable: "npm",
+                args: ["run", name],
                 source: "package.json",
                 confidence: 0.9,
+                executionSupport: "STRUCTURED",
               });
             }
           }

@@ -39,6 +39,7 @@
   },
   "dependencies": {
     "commander": "^12.1.0",
+    "openai": "^7.4.0",
     "yaml": "^2.5.0",
     "zod": "^3.23.0"
   }

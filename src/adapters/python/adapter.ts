@@ -288,8 +288,11 @@ export class PythonAdapter implements EcosystemAdapter {
         name: "test",
         category: "TEST",
         command: "pytest",
+        executable: "pytest",
+        args: [],
         source: "detected test framework",
         confidence: 0.85,
+        executionSupport: "STRUCTURED",
       });
     }
 
@@ -299,8 +302,11 @@ export class PythonAdapter implements EcosystemAdapter {
         name: "install",
         category: "INSTALL",
         command: "pip install -r requirements.txt",
+        executable: "pip",
+        args: ["install", "-r", "requirements.txt"],
         source: "detected package manager",
         confidence: 0.8,
+        executionSupport: "STRUCTURED",
       });
     }
 
@@ -310,8 +316,11 @@ export class PythonAdapter implements EcosystemAdapter {
         name: "install",
         category: "INSTALL",
         command: "poetry install",
+        executable: "poetry",
+        args: ["install"],
         source: "detected package manager",
         confidence: 0.9,
+        executionSupport: "STRUCTURED",
       });
     }
 
@@ -321,8 +330,11 @@ export class PythonAdapter implements EcosystemAdapter {
         name: "install",
         category: "INSTALL",
         command: "uv sync",
+        executable: "uv",
+        args: ["sync"],
         source: "detected package manager",
         confidence: 0.9,
+        executionSupport: "STRUCTURED",
       });
     }
   }

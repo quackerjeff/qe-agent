@@ -6,16 +6,17 @@ The QE Agent is an autonomous software quality engineering system that evaluates
 
 ## Status
 
-**MVP — Milestone 2 (Safe Execution & Evidence)**
+**MVP — Milestone 3 (QE Reasoning)**
 
-The QE Agent can analyze repository structure (Milestone 1) and execute explicitly selected commands through a controlled interface with safety policies, secret redaction, and immutable evidence capture (Milestone 2).
+The QE Agent can analyze repositories, execute validation commands through a controlled interface, and now perform bounded QE reasoning: change analysis, risk assessment, validation planning, evidence-based gap analysis, and verdict generation.
 
-The agent does not yet autonomously select which commands to run. No LLM provider is required.
+An LLM provider (OpenAI) is required for reasoning capabilities. Set `OPENAI_API_KEY` in the environment.
 
 ## Prerequisites
 
 - Node.js >= 20.0.0
 - npm
+- `OPENAI_API_KEY` environment variable (for QE reasoning)
 
 ## Installation
 
@@ -131,6 +132,92 @@ npx tsx src/cli/main.ts exec --command npm --arg test --json
 - Output is truncated at configurable limits with head+tail preservation
 
 **Local execution is not a secure sandbox.** Repository code executed locally runs with the QE Agent's OS privileges. Docker execution with `--network none` provides stronger isolation. Do not execute untrusted repositories without Docker isolation.
+
+### Verify Requirements
+
+Run QE reasoning against supplied requirements:
+
+```bash
+# From a requirements file
+npx tsx src/cli/main.ts verify --requirements requirements.md
+
+# With inline requirements
+npx tsx src/cli/main.ts verify --requirement "Users must log in" --requirement "Admin panel is protected"
+
+# With a specific profile
+npx tsx src/cli/main.ts verify --requirements requirements.md --profile deep
+
+# JSON output
+npx tsx src/cli/main.ts verify --requirements requirements.md --json
+```
+
+Requirements are supplied as Markdown files with headings as requirement titles and bullet points as acceptance criteria. The agent:
+
+1. Discovers the repository structure
+2. Assesses risk based on requirements and repository state
+3. Plans validation using discovered commands
+4. Executes selected validations through the Execution Controller
+5. Investigates failures and classifies causes
+6. Maps evidence to requirements
+7. Identifies verification gaps
+8. Produces an evidence-supported verdict
+
+### Review Changes
+
+Run QE reasoning against a Git baseline:
+
+```bash
+# Review changes since a baseline
+npx tsx src/cli/main.ts review --base main
+
+# With a specific target
+npx tsx src/cli/main.ts review --base main --target feature-branch
+
+# With requirements
+npx tsx src/cli/main.ts review --base main --requirements requirements.md
+
+# JSON output
+npx tsx src/cli/main.ts review --base main --json
+```
+
+Change review additionally performs deterministic Git diff collection and semantic change analysis. Failures are classified as INTRODUCED, PRE_EXISTING, or UNKNOWN through optional baseline comparison.
+
+### Verdicts
+
+QE verdicts reflect the strength of evidence:
+
+| Verdict | Meaning |
+|---------|---------|
+| **PASS** | No material defect identified; evidence strongly supports expected behavior |
+| **PASS_WITH_CONCERNS** | No blocking defect but meaningful residual risk remains |
+| **NEEDS_REVIEW** | Evidence conflicts or material uncertainty requires human judgment |
+| **FAIL** | Demonstrated material defect, regression, or violated requirement |
+| **BLOCKED** | Critical validation could not be performed; insufficient evidence |
+
+Passing one test command alone cannot produce PASS. The Verdict Engine applies deterministic guardrails that may override the model's recommendation.
+
+### Execution Profiles
+
+| Profile | Model Calls | Duration | Validation Breadth |
+|---------|-------------|----------|-------------------|
+| `quick` | Up to 6 | 2 min | Minimal high-value |
+| `standard` | Up to 12 | 10 min | Balanced |
+| `deep` | Up to 24 | 20 min | Thorough |
+
+### Model Configuration
+
+Configure the model provider in `.qe/config.yml`:
+
+```yaml
+version: 1
+model:
+  provider: openai
+  model: gpt-4o
+reasoning:
+  maxModelCalls: 12
+```
+
+API keys come from the environment (`OPENAI_API_KEY`), never from config files.
 
 After building (`npm run build`), the CLI is also available as:
 

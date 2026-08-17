@@ -1,0 +1,10 @@
+{
+  "name": "insufficient-environment",
+  "description": "Critical validation requires database but none is available",
+  "mode": "repository",
+  "profile": "standard",
+  "expectedRisk": ["MEDIUM", "HIGH"],
+  "expectedGapCategories": ["TEST_GAP"],
+  "expectedVerdict": ["BLOCKED", "NEEDS_REVIEW"],
+  "changeDescription": "Repository requires external database for meaningful validation"
+}

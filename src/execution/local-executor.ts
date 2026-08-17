@@ -139,17 +139,24 @@ export class LocalExecutor implements Executor {
         timedOut = true;
         try {
           if (child.pid) {
-            process.kill(-child.pid, "SIGKILL");
+            process.kill(-child.pid, "SIGTERM");
           } else {
-            child.kill("SIGKILL");
+            child.kill("SIGTERM");
           }
         } catch {
+          // already dead
+        }
+        setTimeout(() => {
           try {
-            child.kill("SIGKILL");
+            if (child.pid) {
+              process.kill(-child.pid, "SIGKILL");
+            } else {
+              child.kill("SIGKILL");
+            }
           } catch {
             // already dead
           }
-        }
+        }, 2000);
       }, proposal.timeoutMs);
 
       child.on("error", (err) => {

@@ -90,16 +90,22 @@ export class GenericAdapter implements EcosystemAdapter {
         name: "test",
         category: "TEST",
         command: "go test ./...",
+        executable: "go",
+        args: ["test", "./..."],
         source: "go.mod",
         confidence: 0.85,
+        executionSupport: "STRUCTURED",
       });
       result.commands.push({
         id: "go:build",
         name: "build",
         category: "BUILD",
         command: "go build ./...",
+        executable: "go",
+        args: ["build", "./..."],
         source: "go.mod",
         confidence: 0.85,
+        executionSupport: "STRUCTURED",
       });
     }
 
@@ -139,16 +145,22 @@ export class GenericAdapter implements EcosystemAdapter {
         name: "test",
         category: "TEST",
         command: "cargo test",
+        executable: "cargo",
+        args: ["test"],
         source: "Cargo.toml",
         confidence: 0.85,
+        executionSupport: "STRUCTURED",
       });
       result.commands.push({
         id: "cargo:build",
         name: "build",
         category: "BUILD",
         command: "cargo build",
+        executable: "cargo",
+        args: ["build"],
         source: "Cargo.toml",
         confidence: 0.85,
+        executionSupport: "STRUCTURED",
       });
     }
 
@@ -219,8 +231,11 @@ export class GenericAdapter implements EcosystemAdapter {
         name: "test",
         category: "TEST",
         command: "mvn test",
+        executable: "mvn",
+        args: ["test"],
         source: "pom.xml",
         confidence: 0.85,
+        executionSupport: "STRUCTURED",
       });
     }
 
@@ -246,8 +261,11 @@ export class GenericAdapter implements EcosystemAdapter {
         name: "test",
         category: "TEST",
         command: "gradle test",
+        executable: "gradle",
+        args: ["test"],
         source: gradleFiles[0],
         confidence: 0.8,
+        executionSupport: "STRUCTURED",
       });
     }
   }
@@ -299,8 +317,11 @@ export class GenericAdapter implements EcosystemAdapter {
         name: target,
         category,
         command: `make ${target}`,
+        executable: "make",
+        args: [target],
         source: "Makefile",
         confidence: 0.85,
+        executionSupport: "STRUCTURED",
       });
     }
   }

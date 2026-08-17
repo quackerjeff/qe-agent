@@ -27,7 +27,11 @@ export class FakeModelGateway implements ModelGateway {
         totalTokens: 0,
       },
       model: "fake",
+      provider: "fake",
       durationMs: 0,
+      startedAt: new Date().toISOString(),
+      retryCount: 0,
+      promptVersion: task.promptVersion ?? "unknown",
     };
   }
 }

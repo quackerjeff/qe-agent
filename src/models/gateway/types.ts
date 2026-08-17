@@ -7,6 +7,7 @@ export interface ReasoningTask<T> {
   outputSchema: z.ZodType<T>;
   constraints?: string[];
   maxTokens?: number;
+  promptVersion?: string;
 }
 
 export interface ModelResult<T> {
@@ -17,7 +18,11 @@ export interface ModelResult<T> {
     totalTokens: number;
   };
   model: string;
+  provider: string;
   durationMs: number;
+  startedAt: string;
+  retryCount: number;
+  promptVersion: string;
 }
 
 export interface ModelGateway {

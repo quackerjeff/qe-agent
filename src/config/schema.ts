@@ -48,7 +48,14 @@ export const QEConfigSchema = z.object({
 
   model: z
     .object({
-      provider: z.string().default("default"),
+      provider: z.string().default("openai"),
+      model: z.string().default("gpt-4o"),
+    })
+    .default({}),
+
+  reasoning: z
+    .object({
+      maxModelCalls: z.number().positive().default(12),
     })
     .default({}),
 });

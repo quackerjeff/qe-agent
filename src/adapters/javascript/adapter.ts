@@ -331,6 +331,7 @@ export class JavaScriptAdapter implements EcosystemAdapter {
     };
 
     const pmPrefix = this.getPmPrefix(result);
+    const pmParts = this.getPmParts(result);
 
     for (const [name, script] of Object.entries(pkg.scripts)) {
       const category = categoryMap[name] ?? this.inferCategory(name, script);
@@ -339,8 +340,11 @@ export class JavaScriptAdapter implements EcosystemAdapter {
         name,
         category: category as CommandCategory,
         command: `${pmPrefix} ${name}`,
+        executable: pmParts.executable,
+        args: [...pmParts.args, name],
         source: "package.json",
         confidence: 0.9,
+        executionSupport: "STRUCTURED",
       });
     }
   }
@@ -357,6 +361,25 @@ export class JavaScriptAdapter implements EcosystemAdapter {
         return "bun run";
       default:
         return "npm run";
+    }
+  }
+
+  private getPmParts(result: AdapterResult): {
+    executable: string;
+    args: string[];
+  } {
+    if (result.packageManagers.length !== 1)
+      return { executable: "npm", args: ["run"] };
+    const pm = result.packageManagers[0];
+    switch (pm.id) {
+      case "pnpm":
+        return { executable: "pnpm", args: [] };
+      case "yarn":
+        return { executable: "yarn", args: [] };
+      case "bun":
+        return { executable: "bun", args: ["run"] };
+      default:
+        return { executable: "npm", args: ["run"] };
     }
   }
 

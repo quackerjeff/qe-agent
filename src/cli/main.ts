@@ -8,6 +8,8 @@ import { createLogger } from "../logging/index.js";
 import { runInit } from "./init.js";
 import { runAnalyze } from "./analyze.js";
 import { runExec } from "./exec.js";
+import { runVerify } from "./verify.js";
+import { runReview } from "./review.js";
 
 async function getVersion(): Promise<string> {
   const __filename = fileURLToPath(import.meta.url);
@@ -92,18 +94,42 @@ async function main(): Promise<void> {
 
   program
     .command("verify")
-    .description("Validate requirements against the current repository")
-    .action(() => {
-      console.error("qe verify: not yet implemented");
-      process.exit(1);
+    .description("Run QE reasoning against supplied requirements")
+    .option("--requirements <file>", "Requirements file (Markdown)")
+    .option("--requirement <text...>", "Inline requirement(s)")
+    .option("--repo <path>", "Repository path (default: cwd)")
+    .option("--profile <profile>", "Execution profile: quick, standard, deep")
+    .option("--json", "Output result as JSON")
+    .action(async (opts) => {
+      const logger = createLogger("INFO");
+      try {
+        await runVerify(opts, logger);
+      } catch (err) {
+        logger.error(
+          err instanceof Error ? err.message : "Verification failed",
+        );
+        process.exit(1);
+      }
     });
 
   program
     .command("review")
-    .description("Evaluate changes against a baseline revision")
-    .action(() => {
-      console.error("qe review: not yet implemented");
-      process.exit(1);
+    .description("Run QE reasoning against a Git baseline")
+    .option("--base <ref>", "Baseline Git ref (required)")
+    .option("--target <ref>", "Target Git ref (default: HEAD)")
+    .option("--requirements <file>", "Requirements file (Markdown)")
+    .option("--requirement <text...>", "Inline requirement(s)")
+    .option("--repo <path>", "Repository path (default: cwd)")
+    .option("--profile <profile>", "Execution profile: quick, standard, deep")
+    .option("--json", "Output result as JSON")
+    .action(async (opts) => {
+      const logger = createLogger("INFO");
+      try {
+        await runReview(opts, logger);
+      } catch (err) {
+        logger.error(err instanceof Error ? err.message : "Review failed");
+        process.exit(1);
+      }
     });
 
   await program.parseAsync(process.argv);

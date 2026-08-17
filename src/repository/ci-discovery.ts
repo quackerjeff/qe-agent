@@ -85,11 +85,19 @@ async function extractWorkflowCommands(
         const category = categorizeCommand(trimmed);
         if (category) {
           const id = `ci:${workflowPath}:${commands.length}`;
+          const structured = parseStructuredCommand(trimmed);
           commands.push({
             id,
             name: trimmed.split(" ").slice(0, 3).join(" "),
             category: category,
             command: trimmed,
+            ...(structured
+              ? {
+                  executable: structured.executable,
+                  args: structured.args,
+                  executionSupport: "STRUCTURED" as const,
+                }
+              : { executionSupport: "DISCOVERED_ONLY" as const }),
             source: workflowPath,
             confidence: 0.7,
           });
@@ -157,4 +165,15 @@ function categorizeCommand(
     return "TYPECHECK";
   }
   return undefined;
+}
+
+const SHELL_META = /[|&;<>()$`\\!"'\n*?{}[\]~#]/;
+
+function parseStructuredCommand(
+  cmd: string,
+): { executable: string; args: string[] } | null {
+  if (SHELL_META.test(cmd)) return null;
+  const parts = cmd.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return null;
+  return { executable: parts[0], args: parts.slice(1) };
 }

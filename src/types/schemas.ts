@@ -164,13 +164,19 @@ export const DetectedTechnologySchema = z.object({
 });
 export type DetectedTechnology = z.infer<typeof DetectedTechnologySchema>;
 
+export const ExecutionSupport = z.enum(["STRUCTURED", "DISCOVERED_ONLY"]);
+export type ExecutionSupport = z.infer<typeof ExecutionSupport>;
+
 export const DiscoveredCommandSchema = z.object({
   id: z.string(),
   name: z.string(),
   category: CommandCategory,
   command: z.string(),
+  executable: z.string().optional(),
+  args: z.array(z.string()).optional(),
   source: z.string(),
   confidence: z.number().min(0).max(1),
+  executionSupport: ExecutionSupport.default("DISCOVERED_ONLY"),
 });
 export type DiscoveredCommand = z.infer<typeof DiscoveredCommandSchema>;
 
@@ -250,6 +256,29 @@ export const ExecutionBudgetSchema = z.object({
 });
 export type ExecutionBudget = z.infer<typeof ExecutionBudgetSchema>;
 
+export const LifecycleTransitionSchema = z.object({
+  from: z.string(),
+  to: z.string(),
+  timestamp: z.string(),
+  reason: z.string().optional(),
+});
+export type LifecycleTransition = z.infer<typeof LifecycleTransitionSchema>;
+
+export const ModelCallMetadataSchema = z.object({
+  role: z.string(),
+  provider: z.string(),
+  model: z.string(),
+  promptVersion: z.string(),
+  startedAt: z.string(),
+  durationMs: z.number().nonnegative(),
+  success: z.boolean(),
+  retryCount: z.number().nonnegative(),
+  inputTokens: z.number().nonnegative().optional(),
+  outputTokens: z.number().nonnegative().optional(),
+  totalTokens: z.number().nonnegative().optional(),
+});
+export type ModelCallMetadata = z.infer<typeof ModelCallMetadataSchema>;
+
 export const ExecutionMetricsSchema = z.object({
   startTime: z.string(),
   endTime: z.string().optional(),
@@ -260,6 +289,8 @@ export const ExecutionMetricsSchema = z.object({
   testsGenerated: z.number().nonnegative(),
   retries: z.number().nonnegative(),
   stateTransitions: z.number().nonnegative(),
+  lifecycleHistory: z.array(LifecycleTransitionSchema).optional(),
+  modelCallDetails: z.array(ModelCallMetadataSchema).optional(),
 });
 export type ExecutionMetrics = z.infer<typeof ExecutionMetricsSchema>;
 

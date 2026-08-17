@@ -1,0 +1,11 @@
+{
+  "name": "introduced-regression",
+  "description": "Target revision introduces a test failure not present at baseline",
+  "mode": "change",
+  "profile": "standard",
+  "expectedRisk": ["MEDIUM", "HIGH"],
+  "expectedFindingCategories": ["REGRESSION", "DEFECT"],
+  "expectedClassification": "INTRODUCED",
+  "expectedVerdict": ["FAIL"],
+  "changeDescription": "Break a function that causes test failure"
+}

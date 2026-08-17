@@ -1,0 +1,10 @@
+{
+  "name": "pre-existing-failure",
+  "description": "Both baseline and target fail the same test — change should not be blamed",
+  "mode": "change",
+  "profile": "standard",
+  "expectedRisk": ["MEDIUM", "HIGH"],
+  "expectedClassification": "PRE_EXISTING",
+  "expectedVerdict": ["PASS_WITH_CONCERNS", "NEEDS_REVIEW", "FAIL"],
+  "changeDescription": "Unrelated change with pre-existing broken test"
+}

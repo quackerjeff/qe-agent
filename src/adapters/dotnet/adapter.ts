@@ -201,8 +201,11 @@ export class DotNetAdapter implements EcosystemAdapter {
       name: "build",
       category: "BUILD",
       command: "dotnet build",
+      executable: "dotnet",
+      args: ["build"],
       source: "detected build system",
       confidence: 0.9,
+      executionSupport: "STRUCTURED",
     });
 
     if (result.testFrameworks.length > 0) {
@@ -211,8 +214,11 @@ export class DotNetAdapter implements EcosystemAdapter {
         name: "test",
         category: "TEST",
         command: "dotnet test",
+        executable: "dotnet",
+        args: ["test"],
         source: "detected test framework",
         confidence: 0.9,
+        executionSupport: "STRUCTURED",
       });
     }
   }

@@ -1,0 +1,10 @@
+{
+  "name": "missing-coverage",
+  "description": "Requirements specify capabilities that cannot be validated with available tests",
+  "mode": "repository",
+  "profile": "standard",
+  "expectedRisk": ["MEDIUM", "HIGH"],
+  "expectedGapCategories": ["TEST_GAP"],
+  "expectedVerdict": ["PASS_WITH_CONCERNS", "NEEDS_REVIEW"],
+  "changeDescription": "Repository has test suite but requirements exceed available validation"
+}
