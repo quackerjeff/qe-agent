@@ -17,7 +17,7 @@ export class BudgetManager {
   private _executionAttempts = 0;
   private _retries = 0;
 
-  constructor(private readonly budget: ExecutionBudget) {
+  constructor(public readonly budget: ExecutionBudget) {
     this.startTime = Date.now();
   }
 
@@ -128,16 +128,19 @@ export function createBudgetForProfile(
       maxDurationMs: 120_000,
       maxModelCalls: configMaxModelCalls ?? 6,
       maxRetries: 1,
+      maxGeneratedTests: 1,
     },
     standard: {
       maxDurationMs: 600_000,
       maxModelCalls: configMaxModelCalls ?? 12,
       maxRetries: 2,
+      maxGeneratedTests: 3,
     },
     deep: {
       maxDurationMs: 1_200_000,
       maxModelCalls: configMaxModelCalls ?? 24,
       maxRetries: 3,
+      maxGeneratedTests: 8,
     },
   };
   return budgets[profile];

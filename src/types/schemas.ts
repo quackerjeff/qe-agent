@@ -311,6 +311,103 @@ export const ExecutionMetricsSchema = z.object({
 });
 export type ExecutionMetrics = z.infer<typeof ExecutionMetricsSchema>;
 
+export const TestClassification = z.enum([
+  "PERMANENT_REGRESSION",
+  "CANDIDATE",
+  "INVESTIGATIVE",
+]);
+export type TestClassification = z.infer<typeof TestClassification>;
+
+export const ExecutionTargetingMode = z.enum([
+  "TARGETED",
+  "SUITE_INCLUDED",
+  "UNVERIFIED",
+]);
+export type ExecutionTargetingMode = z.infer<typeof ExecutionTargetingMode>;
+
+export const GeneratedTestFailureClassification = z.enum([
+  "TEST_DEFECT",
+  "PRODUCT_DEFECT",
+  "REGRESSION",
+  "ENVIRONMENT_ISSUE",
+  "UNKNOWN",
+]);
+export type GeneratedTestFailureClassification = z.infer<
+  typeof GeneratedTestFailureClassification
+>;
+
+export const WriteOperation = z.enum(["CREATE", "MODIFY"]);
+export type WriteOperation = z.infer<typeof WriteOperation>;
+
+export const WriteOutcome = z.enum([
+  "APPLIED",
+  "DENIED_PRODUCTION_PATH",
+  "DENIED_TRAVERSAL",
+  "DENIED_SYMLINK",
+  "DENIED_DIRTY_FILE",
+  "DENIED_OUTSIDE_REPO",
+  "DENIED_INVALID_CONTENT",
+  "DENIED_SIZE_LIMIT",
+  "DENIED_FILE_COUNT",
+  "DENIED_UNCERTAIN_CLASSIFICATION",
+]);
+export type WriteOutcome = z.infer<typeof WriteOutcome>;
+
+export const TestGenerationPlanSchema = z.object({
+  objective: z.string().min(1),
+  targetBehavior: z.string().min(1),
+  requirementIds: z.array(z.string()),
+  riskIds: z.array(z.string()).optional(),
+  targetTestFramework: z.string().min(1),
+  targetLocation: z.string().min(1),
+  classification: TestClassification,
+  expectedEvidence: z.string().min(1),
+});
+export type TestGenerationPlan = z.infer<typeof TestGenerationPlanSchema>;
+
+export const GeneratedTestProposalSchema = z.object({
+  filePath: z.string().min(1),
+  operation: WriteOperation,
+  classification: TestClassification,
+  rationale: z.string().min(1),
+  content: z.string().min(1),
+});
+export type GeneratedTestProposal = z.infer<typeof GeneratedTestProposalSchema>;
+
+export const GeneratedTestChangeSchema = z.object({
+  id: z.string().min(1),
+  filePath: z.string().min(1),
+  operation: WriteOperation,
+  classification: TestClassification,
+  rationale: z.string().min(1),
+  writeOutcome: WriteOutcome,
+  beforeHash: z.string().optional(),
+  afterHash: z.string().optional(),
+  executionEvidenceId: z.string().optional(),
+  executionTargetingMode: ExecutionTargetingMode.optional(),
+  framework: z.string().optional(),
+  failureClassification: GeneratedTestFailureClassification.optional(),
+  planObjective: z.string().optional(),
+  retained: z.boolean(),
+  requirementIds: z.array(z.string()),
+});
+export type GeneratedTestChange = z.infer<typeof GeneratedTestChangeSchema>;
+
+export const TestGenerationMetricsSchema = z.object({
+  generationAttempts: z.number().nonnegative(),
+  testsGenerated: z.number().nonnegative(),
+  testsExecuted: z.number().nonnegative(),
+  testsPassing: z.number().nonnegative(),
+  testsFailing: z.number().nonnegative(),
+  testsRejected: z.number().nonnegative(),
+  permanentTestsRetained: z.number().nonnegative(),
+  candidateTestsRetained: z.number().nonnegative(),
+  investigativeTestsRemoved: z.number().nonnegative(),
+  modelCalls: z.number().nonnegative(),
+  durationMs: z.number().nonnegative(),
+});
+export type TestGenerationMetrics = z.infer<typeof TestGenerationMetricsSchema>;
+
 export const QualityGapSchema = z.object({
   area: z.string(),
   description: z.string(),
@@ -334,6 +431,8 @@ export const QEResultSchema = z.object({
   evidence: z.array(EvidenceSchema),
   findings: z.array(FindingSchema),
   baselineComparisons: z.array(BaselineComparisonSchema).optional(),
+  generatedTestChanges: z.array(GeneratedTestChangeSchema).optional(),
+  testGenerationMetrics: TestGenerationMetricsSchema.optional(),
   requirements: z.array(RequirementAssessmentSchema),
   remainingGaps: z.array(QualityGapSchema),
   verdict: Verdict,
@@ -360,6 +459,8 @@ export const PartialQEResultSchema = z.object({
   evidence: z.array(EvidenceSchema),
   findings: z.array(FindingSchema),
   baselineComparisons: z.array(BaselineComparisonSchema).optional(),
+  generatedTestChanges: z.array(GeneratedTestChangeSchema).optional(),
+  testGenerationMetrics: TestGenerationMetricsSchema.optional(),
   requirements: z.array(RequirementAssessmentSchema),
   remainingGaps: z.array(QualityGapSchema),
   verdict: Verdict.optional(),

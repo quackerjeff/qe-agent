@@ -16,6 +16,8 @@ import type {
   ModelCallMetadata,
   LifecycleTransition,
   BaselineComparison,
+  GeneratedTestChange,
+  TestGenerationMetrics,
 } from "../../types/index.js";
 import { QEResultSchema } from "../../types/index.js";
 import { createExecutionId } from "../../logging/index.js";
@@ -49,6 +51,7 @@ import {
 import { investigateFailure } from "../reasoning/failure-investigator.js";
 import { analyzeGaps } from "../reasoning/gap-analyzer.js";
 import { produceVerdict } from "../reasoning/verdict-engine.js";
+import { generateAndExecuteTests } from "../test-generation/index.js";
 
 export interface QEOrchestratorOptions {
   gateway: ModelGateway;
@@ -101,6 +104,8 @@ export class QEOrchestrator {
     let summaryValue = "";
     let recommendedNextActions: string[] = [];
     const baselineComparisons: BaselineComparison[] = [];
+    let generatedTestChanges: GeneratedTestChange[] = [];
+    let testGenerationMetrics: TestGenerationMetrics | undefined;
 
     const controller =
       this.injectedController ??
@@ -466,6 +471,126 @@ export class QEOrchestrator {
         }));
       }
 
+      // GENERATING_TESTS (conditional)
+      const maxGenTests = budget.budget.maxGeneratedTests ?? 0;
+      const hasGaps = remainingGaps.length > 0;
+      const hasRequirements = (request.requirements?.length ?? 0) > 0;
+      const shouldGenerate =
+        maxGenTests > 0 &&
+        hasGaps &&
+        hasRequirements &&
+        budget.canAffordModelCall() &&
+        sm.canTransitionTo("GENERATING_TESTS");
+
+      if (shouldGenerate) {
+        sm.transition("GENERATING_TESTS", "Generate targeted tests");
+        this.logger?.info("Generating tests", {
+          executionId,
+          state: sm.state,
+          gapCount: remainingGaps.length,
+          maxTests: maxGenTests,
+        });
+
+        const genResult = await generateAndExecuteTests({
+          gateway: budgetGateway,
+          controller,
+          profile: repositoryProfile,
+          riskAssessment,
+          gaps: remainingGaps,
+          findings,
+          evidence,
+          requirements: (request.requirements ?? []).map((r) => ({
+            id: r.id,
+            description: r.description,
+          })),
+          executionProfile: request.profile,
+          repositoryPath: request.repositoryPath,
+          maxGeneratedTests: maxGenTests,
+          changedFiles: diffData?.changedFiles.map((f) => f.path),
+          logger: this.logger,
+        });
+
+        budget.recordModelCall();
+        generatedTestChanges = genResult.changes;
+        testGenerationMetrics = genResult.metrics;
+
+        for (const ev of genResult.newEvidence) {
+          evidence.push(ev);
+        }
+        for (const f of genResult.newFindings) {
+          findings.push(f);
+        }
+
+        // RETESTING
+        if (genResult.changes.some((c) => c.writeOutcome === "APPLIED")) {
+          sm.transition("RETESTING", "Retest after generation");
+          this.logger?.info("Retesting existing coverage", {
+            executionId,
+            state: sm.state,
+          });
+
+          const retestActions = (validationPlan?.plannedActions ?? [])
+            .filter((a) => a.command && a.type === "TEST")
+            .slice(0, 2);
+
+          for (const action of retestActions) {
+            if (!budget.canAffordExecution(action.estimatedDurationMs)) break;
+            if (!action.command) continue;
+
+            const proposal: CommandProposal = {
+              executable: action.command.executable,
+              args: action.command.args,
+              workingDirectory: action.command.workingDirectory,
+              timeoutMs: Math.min(action.command.timeoutMs, budget.remainingMs),
+              purpose: `Retest: ${action.purpose}`,
+              mutability: "READ_ONLY",
+              network: "ALLOWED",
+            };
+
+            const execCtx: ExecutionContext = {
+              repositoryRoot: request.repositoryPath,
+              executionMode: "local",
+              secrets: [],
+              maxOutputBytes: 1_048_576,
+            };
+
+            const { result } = await controller.execute(proposal, execCtx);
+            budget.recordExecution();
+            const typedEvidence = createExecutionEvidence(result, action.type);
+            evidence.push(typedEvidence);
+          }
+        }
+
+        // Re-analyze gaps after test generation + retesting
+        if (
+          sm.canTransitionTo("ANALYZING_GAPS") &&
+          budget.canAffordModelCall() &&
+          (request.requirements?.length ?? 0) > 0
+        ) {
+          sm.transition("ANALYZING_GAPS", "Re-analyze gaps after generation");
+          this.logger?.info("Re-analyzing gaps", {
+            executionId,
+            state: sm.state,
+          });
+
+          const gapResult = await analyzeGaps(
+            budgetGateway,
+            request.requirements!,
+            evidence,
+            findings,
+            riskAssessment,
+            diffData ? { changedFiles: diffData.changedFiles } : undefined,
+          );
+          budget.recordModelCall();
+          remainingGaps = gapResult.gaps;
+          requirementAssessments = gapResult.requirementAssessments;
+          requirementAssessments = validateEvidenceReferences(
+            requirementAssessments,
+            evidence,
+          );
+        }
+      }
+
       // FORMING_VERDICT
       sm.transition("FORMING_VERDICT", "Form verdict");
       this.logger?.info("Forming verdict", { executionId, state: sm.state });
@@ -543,8 +668,8 @@ export class QEOrchestrator {
       durationMs: budgetSnap.elapsedMs,
       modelCalls: budgetSnap.modelCalls,
       commandsExecuted: budgetSnap.executionAttempts,
-      testsExecuted: 0,
-      testsGenerated: 0,
+      testsExecuted: testGenerationMetrics?.testsExecuted ?? 0,
+      testsGenerated: testGenerationMetrics?.testsGenerated ?? 0,
       retries: budgetSnap.retries,
       stateTransitions: sm.history.length,
       lifecycleHistory,
@@ -587,6 +712,9 @@ export class QEOrchestrator {
       findings,
       baselineComparisons:
         baselineComparisons.length > 0 ? baselineComparisons : undefined,
+      generatedTestChanges:
+        generatedTestChanges.length > 0 ? generatedTestChanges : undefined,
+      testGenerationMetrics,
       requirements: requirementAssessments,
       remainingGaps,
       verdict: verdictValue,
