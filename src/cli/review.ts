@@ -64,6 +64,10 @@ export async function runReview(
     gateway,
     logger: effectiveLogger,
     maxModelCalls: config.reasoning.maxModelCalls,
+    memoryConfig: {
+      enabled: config.memory.enabled,
+      historySummaries: config.memory.historySummaries,
+    },
   });
 
   const request: QERequest = {

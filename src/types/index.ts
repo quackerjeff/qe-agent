@@ -17,6 +17,22 @@ export {
 } from "./domain.js";
 
 export {
+  MemoryUpdateResultSchema,
+  MemoryWarningSchema,
+  MemoryMetricsSchema,
+} from "../core/memory/types.js";
+
+export type {
+  MemoryUpdateResult,
+  MemoryWarning,
+  MemoryUpdateProposal,
+  ProjectMemory,
+  MemoryUpdateContext,
+  MemoryMetrics,
+  MemoryClaimCategory,
+} from "../core/memory/types.js";
+
+export {
   RequirementSchema,
   RequirementAssessmentSchema,
   QERequestSchema,

@@ -70,6 +70,14 @@ import {
 } from "../browser/managed-process.js";
 import { investigateBrowserFailure } from "../browser/failure-investigator.js";
 import { validateBrowserActions } from "../browser/action-validator.js";
+import { ProjectMemoryManager } from "../memory/manager.js";
+import type {
+  ProjectMemory,
+  MemoryUpdateResult,
+  MemoryWarning,
+  MemoryMetrics,
+} from "../memory/types.js";
+import { buildMemoryDistillationTask } from "../../prompts/memory-distillation/v1.js";
 
 export interface QEOrchestratorOptions {
   gateway: ModelGateway;
@@ -84,6 +92,11 @@ export interface QEOrchestratorOptions {
     allowedOrigins?: string[];
     headless?: boolean;
   };
+  memoryConfig?: {
+    enabled: boolean;
+    historySummaries?: boolean;
+  };
+  knownSecrets?: string[];
 }
 
 export class QEOrchestrator {
@@ -94,6 +107,8 @@ export class QEOrchestrator {
   private readonly injectedController?: ExecutionController;
   private readonly browserCapability?: BrowserCapability;
   private readonly browserConfig?: QEOrchestratorOptions["browserConfig"];
+  private readonly memoryConfig?: QEOrchestratorOptions["memoryConfig"];
+  private readonly knownSecrets: string[];
 
   constructor(options: QEOrchestratorOptions) {
     this.gateway = options.gateway;
@@ -103,6 +118,8 @@ export class QEOrchestrator {
     this.injectedController = options.controller;
     this.browserCapability = options.browserCapability;
     this.browserConfig = options.browserConfig;
+    this.memoryConfig = options.memoryConfig;
+    this.knownSecrets = options.knownSecrets ?? [];
   }
 
   async run(request: QERequest): Promise<QEResult> {
@@ -135,6 +152,21 @@ export class QEOrchestrator {
     const baselineComparisons: BaselineComparison[] = [];
     let generatedTestChanges: GeneratedTestChange[] = [];
     let testGenerationMetrics: TestGenerationMetrics | undefined;
+    let memoryUpdateResults: MemoryUpdateResult[] = [];
+    const memoryWarnings: MemoryWarning[] = [];
+    let projectMemory: ProjectMemory = {
+      knowledgeFiles: [],
+      historySummaries: [],
+    };
+    const memoryMetrics: MemoryMetrics = {
+      memoryFilesRead: 0,
+      memoryEntriesUsed: 0,
+      memoryUpdatesProposed: 0,
+      memoryUpdatesApplied: 0,
+      memoryUpdatesRejected: 0,
+      memoryConflicts: 0,
+    };
+    const memoryEnabled = this.memoryConfig?.enabled !== false;
 
     const controller =
       this.injectedController ??
@@ -153,6 +185,35 @@ export class QEOrchestrator {
         : await analyzeRepository({
             targetPath: request.repositoryPath,
           });
+
+      // Load project memory early to influence reasoning
+      if (memoryEnabled) {
+        try {
+          const memManager = new ProjectMemoryManager();
+          const loadResult = await memManager.load(request.repositoryPath);
+          projectMemory = loadResult.memory;
+          memoryWarnings.push(...loadResult.warnings);
+          memoryMetrics.memoryFilesRead = loadResult.metrics.memoryFilesRead;
+          memoryMetrics.memoryEntriesUsed =
+            loadResult.metrics.memoryEntriesUsed;
+          this.logger?.info("Loaded project memory", {
+            executionId,
+            filesRead: loadResult.metrics.memoryFilesRead,
+            entriesUsed: loadResult.metrics.memoryEntriesUsed,
+            warnings: loadResult.warnings.length,
+          });
+        } catch (err) {
+          this.logger?.warn("Failed to load project memory", {
+            executionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          memoryWarnings.push({
+            type: "READ_FAILURE",
+            source: ".qe/",
+            message: `Failed to load project memory: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        }
+      }
 
       // Collect Git diff data if in change mode
       let diffData: GitDiffData | undefined;
@@ -201,6 +262,7 @@ export class QEOrchestrator {
           diffData,
           fileDiffs,
           evidence,
+          projectMemory: memoryEnabled ? projectMemory : undefined,
         });
 
         if (budget.canAffordModelCall()) {
@@ -234,6 +296,7 @@ export class QEOrchestrator {
         profile: repositoryProfile,
         diffData,
         evidence,
+        projectMemory: memoryEnabled ? projectMemory : undefined,
       });
 
       if (budget.canAffordModelCall()) {
@@ -271,6 +334,7 @@ export class QEOrchestrator {
         profile: repositoryProfile,
         diffData,
         evidence,
+        projectMemory: memoryEnabled ? projectMemory : undefined,
       });
 
       if (budget.canAffordModelCall()) {
@@ -1134,6 +1198,159 @@ export class QEOrchestrator {
         recommendedNextActions = ["Re-run with a larger budget"];
       }
 
+      // Deterministic stale-memory conflict detection (Correction 4)
+      if (memoryEnabled && repositoryProfile) {
+        const memManager = new ProjectMemoryManager();
+        const deterministicStale = memManager.detectStaleMemoryConflicts(
+          projectMemory,
+          {
+            packageManagers: repositoryProfile.packageManagers.map((p) => ({
+              name: p.name,
+            })),
+            commands: repositoryProfile.commands.map((c) => ({
+              name: c.name,
+              command: c.command,
+              category: c.category,
+            })),
+            testFrameworks: repositoryProfile.testFrameworks.map((t) => ({
+              name: t.name,
+            })),
+          },
+        );
+        for (const w of deterministicStale) {
+          memoryWarnings.push(w);
+          memoryMetrics.memoryConflicts++;
+        }
+      }
+
+      // Memory distillation — after verdict, before reporting
+      if (memoryEnabled && budget.canAffordModelCall()) {
+        try {
+          const memManager = new ProjectMemoryManager();
+          const distillationTask = buildMemoryDistillationTask({
+            repositoryRoot: request.repositoryPath,
+            executionId,
+            evidence: evidence.map((e) => ({
+              id: e.id,
+              type: e.type,
+              status: e.status,
+              summary: e.summary,
+            })),
+            findings: findings.map((f) => ({
+              id: f.id,
+              category: f.category,
+              title: f.title,
+            })),
+            verdict: verdictValue,
+            discoveredCommands: (repositoryProfile?.commands ?? []).map(
+              (c) => ({
+                name: c.name,
+                command: c.command,
+                category: c.category,
+              }),
+            ),
+            riskSummary: riskAssessment?.summary,
+            changeAnalysisSummary: changeAnalysis?.summary,
+            existingMemory: projectMemory,
+          });
+
+          const distillResult = await budgetGateway.reason(distillationTask);
+          budget.recordModelCall();
+
+          const proposals = distillResult.data.proposals;
+          memoryMetrics.memoryUpdatesProposed = proposals.length;
+
+          // Detect stale entries as warnings (model-reported)
+          for (const stale of distillResult.data.staleEntries) {
+            const alreadyWarned = memoryWarnings.some(
+              (w) =>
+                w.type === "STALE" &&
+                w.source === stale.source &&
+                w.message === stale.reason,
+            );
+            if (!alreadyWarned) {
+              memoryWarnings.push({
+                type: "STALE",
+                source: stale.source,
+                message: stale.reason,
+                proposedCorrection: stale.proposedCorrection,
+              });
+              memoryMetrics.memoryConflicts++;
+            }
+          }
+
+          // Apply memory updates with known secrets and evidence (Corrections 1 & 2)
+          if (proposals.length > 0) {
+            const { results, metrics: updateMetrics } =
+              await memManager.applyUpdates(
+                request.repositoryPath,
+                proposals,
+                projectMemory,
+                {
+                  knownSecrets: this.knownSecrets,
+                  currentEvidence: evidence.map((e) => ({
+                    id: e.id,
+                    type: e.type,
+                    status: e.status,
+                    provenance: e.provenance,
+                  })),
+                },
+              );
+            memoryUpdateResults = results;
+            memoryMetrics.memoryUpdatesApplied =
+              updateMetrics.memoryUpdatesApplied;
+            memoryMetrics.memoryUpdatesRejected =
+              updateMetrics.memoryUpdatesRejected;
+          }
+
+          // Write history summary if enabled
+          if (this.memoryConfig?.historySummaries !== false) {
+            const summaryContent = `# QE Run ${executionId}\n\nDate: ${new Date().toISOString()}\nVerdict: ${verdictValue}\nProfile: ${request.profile}\n\n## Findings\n\n${findings.length > 0 ? findings.map((f) => `- [${f.category}] ${f.title}`).join("\n") : "None"}\n`;
+            const knownSecrets = this.knownSecrets;
+            const hasSecretInSummary = memManager.containsKnownSecrets(
+              summaryContent,
+              knownSecrets,
+            );
+
+            if (!hasSecretInSummary) {
+              const summaryProposal = {
+                target: "HISTORY" as const,
+                operation: "ADD" as const,
+                topic: executionId,
+                rationale: "Run summary for future reference",
+                content: summaryContent,
+                confidence: 1.0,
+              };
+              const { results: histResults } = await memManager.applyUpdates(
+                request.repositoryPath,
+                [summaryProposal],
+                projectMemory,
+                { knownSecrets },
+              );
+              memoryUpdateResults.push(...histResults);
+            }
+          }
+
+          this.logger?.info("Memory distillation complete", {
+            executionId,
+            proposed: memoryMetrics.memoryUpdatesProposed,
+            applied: memoryMetrics.memoryUpdatesApplied,
+            rejected: memoryMetrics.memoryUpdatesRejected,
+            conflicts: memoryMetrics.memoryConflicts,
+          });
+        } catch (err) {
+          this.logger?.warn("Memory distillation failed", {
+            executionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          memoryWarnings.push({
+            type: "READ_FAILURE",
+            source: "memory-distillation",
+            message: `Memory distillation failed: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        }
+      }
+
       // REPORTING
       sm.transition("REPORTING", "Generate report");
       sm.transition("COMPLETE", "QE run complete");
@@ -1222,6 +1439,10 @@ export class QEOrchestrator {
       generatedTestChanges:
         generatedTestChanges.length > 0 ? generatedTestChanges : undefined,
       testGenerationMetrics,
+      memoryUpdates:
+        memoryUpdateResults.length > 0 ? memoryUpdateResults : undefined,
+      memoryWarnings: memoryWarnings.length > 0 ? memoryWarnings : undefined,
+      memoryMetrics: memoryEnabled ? memoryMetrics : undefined,
       requirements: requirementAssessments,
       remainingGaps,
       verdict: verdictValue,

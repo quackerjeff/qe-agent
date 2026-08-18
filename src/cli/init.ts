@@ -46,5 +46,19 @@ export async function runInit(
 
   await writeFile(configPath, yamlContent, "utf-8");
 
+  // Create .gitignore for ephemeral artifacts
+  const gitignorePath = join(qeDir, ".gitignore");
+  try {
+    await readFile(gitignorePath, "utf-8");
+  } catch {
+    const gitignoreContent = `# Ephemeral QE artifacts — not committed
+runs/
+cache/
+artifacts/
+traces/
+`;
+    await writeFile(gitignorePath, gitignoreContent, "utf-8");
+  }
+
   logger.info("Initialized QE configuration at .qe/config.yml");
 }

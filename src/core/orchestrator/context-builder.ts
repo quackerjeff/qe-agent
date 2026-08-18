@@ -4,6 +4,7 @@ import type {
   Evidence,
 } from "../../types/index.js";
 import type { GitDiffData } from "../git/index.js";
+import type { ProjectMemory } from "../memory/types.js";
 
 export interface ContextLimits {
   maxChangedFilesIncluded: number;
@@ -52,6 +53,12 @@ export interface ReasoningContext {
     summary: string;
   }[];
   instructions?: string;
+  projectMemory?: {
+    project?: string;
+    testing?: string;
+    risks?: { topic: string; content: string }[];
+    knowledgeFiles?: { name: string; content: string }[];
+  };
   truncation: ContextTruncation;
 }
 
@@ -69,6 +76,7 @@ export function buildReasoningContext(opts: {
   fileDiffs?: Record<string, string>;
   evidence?: Evidence[];
   instructions?: string;
+  projectMemory?: ProjectMemory;
   limits?: Partial<ContextLimits>;
 }): ReasoningContext {
   const limits = { ...DEFAULT_LIMITS, ...opts.limits };
@@ -175,6 +183,31 @@ export function buildReasoningContext(opts: {
     summary: e.summary,
   }));
 
+  let projectMemoryCtx: ReasoningContext["projectMemory"];
+  if (opts.projectMemory) {
+    const mem = opts.projectMemory;
+    const maxMemBytes = 4096;
+    projectMemoryCtx = {};
+    if (mem.project) {
+      projectMemoryCtx.project = mem.project.content.slice(0, maxMemBytes);
+    }
+    if (mem.testing) {
+      projectMemoryCtx.testing = mem.testing.content.slice(0, maxMemBytes);
+    }
+    if (mem.risks && mem.risks.entries.length > 0) {
+      projectMemoryCtx.risks = mem.risks.entries.map((e) => ({
+        topic: e.topic,
+        content: e.content.slice(0, 1024),
+      }));
+    }
+    if (mem.knowledgeFiles.length > 0) {
+      projectMemoryCtx.knowledgeFiles = mem.knowledgeFiles.map((k) => ({
+        name: k.name,
+        content: k.content.slice(0, 1024),
+      }));
+    }
+  }
+
   return {
     requirements: opts.requirements,
     repositoryProfile: repoContext,
@@ -182,6 +215,7 @@ export function buildReasoningContext(opts: {
     fileDiffs,
     priorEvidence,
     instructions,
+    projectMemory: projectMemoryCtx,
     truncation,
   };
 }

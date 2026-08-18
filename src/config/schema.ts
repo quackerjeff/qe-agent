@@ -46,6 +46,7 @@ export const QEConfigSchema = z.object({
   memory: z
     .object({
       enabled: z.boolean().default(true),
+      historySummaries: z.boolean().default(true),
     })
     .default({}),
 

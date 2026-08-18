@@ -66,6 +66,7 @@ export function buildValidationPlanTask(
       availableCapabilities: ctx.repositoryProfile.capabilities,
       executionProfile: profile,
       priorEvidence: ctx.priorEvidence,
+      projectMemory: ctx.projectMemory ?? {},
     },
     outputSchema: ValidationPlanOutputSchema,
     constraints: [

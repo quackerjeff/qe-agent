@@ -37,6 +37,7 @@ export function buildRiskAnalysisTask(
       changeData: ctx.changeData ?? {},
       changeAnalysis: changeAnalysis ?? {},
       priorEvidence: ctx.priorEvidence,
+      projectMemory: ctx.projectMemory ?? {},
     },
     outputSchema: RiskAnalysisOutputSchema,
     constraints: [

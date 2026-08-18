@@ -16,6 +16,11 @@ import {
   ValidationActionType,
   Verdict,
 } from "./domain.js";
+import {
+  MemoryUpdateResultSchema,
+  MemoryWarningSchema,
+  MemoryMetricsSchema,
+} from "../core/memory/types.js";
 
 export const RequirementSchema = z.object({
   id: z.string().min(1),
@@ -437,6 +442,9 @@ export const QEResultSchema = z.object({
   baselineComparisons: z.array(BaselineComparisonSchema).optional(),
   generatedTestChanges: z.array(GeneratedTestChangeSchema).optional(),
   testGenerationMetrics: TestGenerationMetricsSchema.optional(),
+  memoryUpdates: z.array(MemoryUpdateResultSchema).optional(),
+  memoryWarnings: z.array(MemoryWarningSchema).optional(),
+  memoryMetrics: MemoryMetricsSchema.optional(),
   requirements: z.array(RequirementAssessmentSchema),
   remainingGaps: z.array(QualityGapSchema),
   verdict: Verdict,
@@ -465,6 +473,9 @@ export const PartialQEResultSchema = z.object({
   baselineComparisons: z.array(BaselineComparisonSchema).optional(),
   generatedTestChanges: z.array(GeneratedTestChangeSchema).optional(),
   testGenerationMetrics: TestGenerationMetricsSchema.optional(),
+  memoryUpdates: z.array(MemoryUpdateResultSchema).optional(),
+  memoryWarnings: z.array(MemoryWarningSchema).optional(),
+  memoryMetrics: MemoryMetricsSchema.optional(),
   requirements: z.array(RequirementAssessmentSchema),
   remainingGaps: z.array(QualityGapSchema),
   verdict: Verdict.optional(),
