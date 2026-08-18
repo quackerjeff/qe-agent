@@ -11,9 +11,14 @@ import {
 } from "./requirements-parser.js";
 import type {
   QERequest,
+  QEResult,
   Requirement,
   ExecutionProfile,
 } from "../types/index.js";
+import { persistResult } from "../github/reporter.js";
+import { getCiExitCode } from "../github/verdict.js";
+import type { Verdict } from "../types/domain.js";
+import { writeSafeResultOutput } from "./output-path.js";
 
 export interface ReviewCommandOptions {
   base?: string;
@@ -23,6 +28,8 @@ export interface ReviewCommandOptions {
   repo?: string;
   profile?: string;
   json?: boolean;
+  output?: string;
+  ci?: boolean;
 }
 
 export async function runReview(
@@ -44,6 +51,103 @@ export async function runReview(
 
   if (!options.base) {
     effectiveLogger.error("--base <ref> is required for change review");
+    process.exit(1);
+  }
+
+  try {
+    const { execFile: execFileCb } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFileAsync = promisify(execFileCb);
+    await execFileAsync("git", ["rev-parse", "--verify", options.base], {
+      cwd: repoPath,
+      timeout: 10_000,
+    });
+  } catch {
+    const blockedResult: QEResult = {
+      executionId: `blocked-${Date.now()}`,
+      repository: {
+        path: repoPath,
+        name: repoPath.split("/").pop() ?? "repo",
+      },
+      target: options.target ?? "HEAD",
+      profile: (options.profile ?? "standard") as ExecutionProfile,
+      repositoryProfile: {
+        root: repoPath,
+        git: { detected: true },
+        languages: [],
+        frameworks: [],
+        packageManagers: [],
+        buildSystems: [],
+        testFrameworks: [],
+        ciSystems: [],
+        applications: [],
+        documentation: [],
+        commands: [],
+        capabilities: [],
+        confidence: 0,
+      },
+      riskAssessment: {
+        level: "MEDIUM",
+        factors: [],
+        confidence: 0,
+        summary: "Unable to assess — baseline unavailable",
+      },
+      validationPlan: {
+        objectives: [],
+        plannedActions: [],
+        identifiedRisks: [],
+        expectedCapabilities: [],
+      },
+      evidence: [],
+      findings: [],
+      requirements: [],
+      remainingGaps: [
+        {
+          area: "baseline-comparison",
+          description: `Baseline revision ${options.base} is not available locally`,
+          reason:
+            "Shallow clone or missing history prevents baseline comparison",
+          risk: "CRITICAL" as const,
+        },
+      ],
+      verdict: "BLOCKED",
+      confidence: "HIGH",
+      summary: `Baseline revision ${options.base} is not available locally — cannot perform change comparison`,
+      recommendedNextActions: [
+        "Fetch the required baseline history: git fetch origin <sha>",
+        "Or use a full clone instead of a shallow clone",
+      ],
+      metrics: {
+        startTime: new Date().toISOString(),
+        endTime: new Date().toISOString(),
+        durationMs: 0,
+        modelCalls: 0,
+        commandsExecuted: 0,
+        testsExecuted: 0,
+        testsGenerated: 0,
+        retries: 0,
+        stateTransitions: 0,
+      },
+    };
+
+    if (options.output) {
+      const writeResult = await writeSafeResultOutput(
+        repoPath,
+        options.output,
+        JSON.stringify(blockedResult, null, 2),
+      );
+      if (!writeResult.ok) {
+        effectiveLogger.error(writeResult.error);
+        process.exit(1);
+      }
+    }
+
+    if (options.json) {
+      console.log(JSON.stringify(blockedResult, null, 2));
+    } else {
+      console.log(formatQEReport(blockedResult));
+    }
+
     process.exit(1);
   }
 
@@ -81,10 +185,29 @@ export async function runReview(
 
   const result = await orchestrator.run(request);
 
+  if (options.output) {
+    const writeResult = await writeSafeResultOutput(
+      repoPath,
+      options.output,
+      JSON.stringify(result, null, 2),
+    );
+    if (!writeResult.ok) {
+      effectiveLogger.error(writeResult.error);
+      process.exit(1);
+    }
+  } else if (options.ci) {
+    await persistResult(result, repoPath);
+  }
+
   if (options.json) {
     console.log(JSON.stringify(result, null, 2));
   } else {
     console.log(formatQEReport(result));
+  }
+
+  if (options.ci) {
+    const failOn = config.ci?.failOn ?? (["FAIL", "BLOCKED"] as Verdict[]);
+    process.exit(getCiExitCode(result.verdict, failOn));
   }
 
   if (result.verdict === "FAIL" || result.verdict === "BLOCKED") {

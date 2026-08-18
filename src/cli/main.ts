@@ -10,6 +10,7 @@ import { runAnalyze } from "./analyze.js";
 import { runExec } from "./exec.js";
 import { runVerify } from "./verify.js";
 import { runReview } from "./review.js";
+import { runGitHubPublish } from "./github-publish.js";
 
 async function getVersion(): Promise<string> {
   const __filename = fileURLToPath(import.meta.url);
@@ -100,6 +101,7 @@ async function main(): Promise<void> {
     .option("--repo <path>", "Repository path (default: cwd)")
     .option("--profile <profile>", "Execution profile: quick, standard, deep")
     .option("--json", "Output result as JSON")
+    .option("--output <path>", "Write QE result JSON to file")
     .action(async (opts) => {
       const logger = createLogger("INFO");
       try {
@@ -122,12 +124,37 @@ async function main(): Promise<void> {
     .option("--repo <path>", "Repository path (default: cwd)")
     .option("--profile <profile>", "Execution profile: quick, standard, deep")
     .option("--json", "Output result as JSON")
+    .option("--output <path>", "Write QE result JSON to file")
+    .option("--ci", "CI mode: persist result and use configured exit codes")
     .action(async (opts) => {
       const logger = createLogger("INFO");
       try {
         await runReview(opts, logger);
       } catch (err) {
         logger.error(err instanceof Error ? err.message : "Review failed");
+        process.exit(1);
+      }
+    });
+
+  const github = program
+    .command("github")
+    .description("GitHub integration commands");
+
+  github
+    .command("publish")
+    .description("Publish QE result to GitHub")
+    .requiredOption("--result <path>", "Path to QE result JSON file")
+    .option("--repo <path>", "Repository path (default: cwd)")
+    .option("--dry-run", "Preview publishing without remote writes")
+    .option("--json", "Output publishing result as JSON")
+    .action(async (opts) => {
+      const logger = createLogger("INFO");
+      try {
+        await runGitHubPublish(opts, logger);
+      } catch (err) {
+        logger.error(
+          err instanceof Error ? err.message : "GitHub publish failed",
+        );
         process.exit(1);
       }
     });

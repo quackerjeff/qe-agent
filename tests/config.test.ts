@@ -17,8 +17,10 @@ describe("QEConfig defaults", () => {
     expect(config.tests.generation).toBe(true);
     expect(config.tests.commitPermanentTests).toBe(true);
     expect(config.browser.enabled).toBe("auto");
-    expect(config.github.blockOnFail).toBe(true);
-    expect(config.github.createIssues).toBe(true);
+    expect(config.ci.failOn).toEqual(["FAIL", "BLOCKED"]);
+    expect(config.github.checks.enabled).toBe(true);
+    expect(config.github.issues.enabled).toBe(false);
+    expect(config.github.dryRun).toBe(false);
     expect(config.memory.enabled).toBe(true);
     expect(config.model.provider).toBe("openai");
     expect(config.model.model).toBe("gpt-4o");
@@ -46,7 +48,11 @@ describe("QEConfig valid configurations", () => {
       execution: { mode: "docker", maxMinutes: 60 },
       tests: { generation: false, commitPermanentTests: false },
       browser: { enabled: false },
-      github: { blockOnFail: false, createIssues: false },
+      github: {
+        checks: { enabled: false },
+        issues: { enabled: false },
+        dryRun: true,
+      },
       memory: { enabled: false },
       model: { provider: "anthropic" },
     };

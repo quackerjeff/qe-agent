@@ -36,10 +36,46 @@ export const QEConfigSchema = z.object({
     })
     .default({}),
 
+  ci: z
+    .object({
+      failOn: z
+        .array(
+          z.enum([
+            "PASS",
+            "PASS_WITH_CONCERNS",
+            "NEEDS_REVIEW",
+            "FAIL",
+            "BLOCKED",
+          ]),
+        )
+        .default(["FAIL", "BLOCKED"]),
+    })
+    .default({}),
+
   github: z
     .object({
-      blockOnFail: z.boolean().default(true),
-      createIssues: z.boolean().default(true),
+      checks: z
+        .object({
+          enabled: z.boolean().default(true),
+        })
+        .default({}),
+      issues: z
+        .object({
+          enabled: z.boolean().default(false),
+          minimumSeverity: z
+            .enum([
+              "BLOCKER",
+              "CRITICAL",
+              "HIGH",
+              "MEDIUM",
+              "LOW",
+              "INFORMATIONAL",
+            ])
+            .default("HIGH"),
+          minimumConfidence: z.number().min(0).max(1).default(0.8),
+        })
+        .default({}),
+      dryRun: z.boolean().default(false),
     })
     .default({}),
 

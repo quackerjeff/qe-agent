@@ -14,6 +14,7 @@ import type {
   Requirement,
   ExecutionProfile,
 } from "../types/index.js";
+import { writeSafeResultOutput } from "./output-path.js";
 
 export interface VerifyCommandOptions {
   requirements?: string;
@@ -21,6 +22,7 @@ export interface VerifyCommandOptions {
   repo?: string;
   profile?: string;
   json?: boolean;
+  output?: string;
 }
 
 export async function runVerify(
@@ -78,6 +80,18 @@ export async function runVerify(
   };
 
   const result = await orchestrator.run(request);
+
+  if (options.output) {
+    const writeResult = await writeSafeResultOutput(
+      repoPath,
+      options.output,
+      JSON.stringify(result, null, 2),
+    );
+    if (!writeResult.ok) {
+      effectiveLogger.error(writeResult.error);
+      process.exit(1);
+    }
+  }
 
   if (options.json) {
     console.log(JSON.stringify(result, null, 2));
