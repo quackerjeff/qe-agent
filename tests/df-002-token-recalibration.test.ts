@@ -303,10 +303,8 @@ describe("DF-002: Gap analysis output token recalibration", () => {
   });
 
   it("Case 13: canonical completeness fallback unchanged when chunk fails", async () => {
-    let callCount = 0;
     const gateway: ModelGateway = {
       async reason<T>(): Promise<ModelResult<T>> {
-        callCount++;
         throw new OutputTruncationError("truncated", 2602, {
           promptTokens: 500,
           completionTokens: 2602,
