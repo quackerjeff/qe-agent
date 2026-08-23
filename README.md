@@ -226,8 +226,32 @@ node dist/cli/main.js --help
 node dist/cli/main.js init
 ```
 
+## Using QE Agent on Another Project
+
+QE Agent can validate any software repository, not just itself. Build once, then point it at your project:
+
+```bash
+# Build QE Agent
+npm install && npm run build
+
+# Set your API key
+export OPENAI_API_KEY="sk-..."
+
+# Analyze your project (no API key needed)
+node dist/cli/main.js analyze --repo /path/to/your-project
+
+# Verify against requirements
+node dist/cli/main.js verify \
+  --profile quick \
+  --repo /path/to/your-project \
+  --requirements /path/to/your-project/docs/requirements.md
+```
+
+See the **[User Guide](docs/USER_GUIDE.md)** for complete documentation including requirements format, configuration, diagnostics, troubleshooting, and cross-project acceptance evaluation prompts.
+
 ## Documentation
 
+- **[User Guide](docs/USER_GUIDE.md)** — how to build, configure, and use QE Agent
 - [Product & Functional Requirements](docs/Automated%20QE%20Agent%20—%20Product%20&%20Functional%20Requirements.md)
 - [Technical Product Specification & System Design](docs/QE%20Agent%20—%20MVP%20Technical%20Product%20Specification%20&%20System%20Design.md)
 - [Architecture Decision Records](docs/adr/)
