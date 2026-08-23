@@ -145,9 +145,11 @@ describe("Correction 6 — Valid JSON output", () => {
       { cwd: PROJECT_ROOT },
     );
     const parsed = JSON.parse(stdout);
-    expect(parsed.root).toBeDefined();
-    expect(parsed.languages).toBeInstanceOf(Array);
-    expect(parsed.commands).toBeInstanceOf(Array);
+    expect(parsed.repositoryProfile).toBeDefined();
+    expect(parsed.repositoryProfile.root).toBeDefined();
+    expect(parsed.repositoryProfile.languages).toBeInstanceOf(Array);
+    expect(parsed.repositoryProfile.commands).toBeInstanceOf(Array);
+    expect(parsed.aiUsage).toBeDefined();
   });
 });
 

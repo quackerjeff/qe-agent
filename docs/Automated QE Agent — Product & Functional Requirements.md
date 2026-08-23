@@ -903,6 +903,43 @@ The agent SHOULD maximize confidence within the available budget.
 
 ---
 
+## FR-035A Token and Cost Telemetry
+
+The system SHALL expose first-class AI usage telemetry for QE runs that use the
+Model Gateway.
+
+Telemetry SHOULD include, where available:
+
+- model call count;
+- input/context tokens;
+- output/completion tokens;
+- cached tokens;
+- maximum response token reservation;
+- estimated token-per-minute demand;
+- applicable model or account throughput limit when known;
+- estimated cost.
+
+The system SHOULD estimate token demand before making model calls. If the
+estimated request demand exceeds the effective model or TPM limit, the agent
+SHOULD reduce, chunk, or summarize context before dispatching the call.
+
+The agent SHALL NOT rely on exponential backoff as the only response to an
+intrinsically oversized request. Backoff is appropriate for temporary quota
+exhaustion, but it does not make a single oversized request fit under a lower
+throughput ceiling.
+
+When a request still cannot fit after reasonable reduction, the system SHOULD
+return a clear blocked or degraded result explaining that the context exceeds
+available model throughput.
+
+Human-readable and JSON output SHOULD explain the major token contributors
+well enough for users to understand why a run consumed or attempted to consume
+the reported number of tokens.
+
+See `docs/features/token-cost-telemetry.md` for the feature addendum.
+
+---
+
 ## FR-036 Artifact Collection
 
 The system SHOULD retain useful evidence such as:

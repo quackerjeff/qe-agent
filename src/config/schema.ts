@@ -90,6 +90,8 @@ export const QEConfigSchema = z.object({
     .object({
       provider: z.string().default("openai"),
       model: z.string().default("gpt-4o"),
+      tokenLimit: z.number().positive().optional(),
+      tpmLimit: z.number().positive().optional(),
     })
     .default({}),
 

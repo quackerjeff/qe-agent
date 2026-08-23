@@ -21,7 +21,14 @@ export function formatZodError(error: ZodError): string[] {
   });
 }
 
-export async function loadConfig(repositoryPath: string): Promise<QEConfig> {
+export interface LoadConfigResult {
+  config: QEConfig;
+  explicitMaxModelCalls?: number;
+}
+
+export async function loadConfig(
+  repositoryPath: string,
+): Promise<LoadConfigResult> {
   const configPath = join(repositoryPath, ".qe", "config.yml");
 
   let content: string;
@@ -60,7 +67,14 @@ export async function loadConfig(repositoryPath: string): Promise<QEConfig> {
     );
   }
 
-  return result.data;
+  const raw = parsed as Record<string, unknown>;
+  const rawReasoning = raw?.reasoning as Record<string, unknown> | undefined;
+  const explicitMaxModelCalls =
+    typeof rawReasoning?.maxModelCalls === "number"
+      ? rawReasoning.maxModelCalls
+      : undefined;
+
+  return { config: result.data, explicitMaxModelCalls };
 }
 
 export function getDefaultConfig(): QEConfig {

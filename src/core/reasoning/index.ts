@@ -12,7 +12,16 @@ export type {
   FailureInvestigationResult,
   BaselineComparisonResult,
 } from "./failure-investigator.js";
-export { analyzeGaps } from "./gap-analyzer.js";
-export type { GapAnalysisResult } from "./gap-analyzer.js";
+export {
+  analyzeGaps,
+  analyzeGapsChunked,
+  chunkRequirements,
+  mergeGaps,
+  MAX_REQUIREMENTS_PER_GAP_CHUNK,
+} from "./gap-analyzer.js";
+export type {
+  GapAnalysisResult,
+  ChunkedGapAnalysisResult,
+} from "./gap-analyzer.js";
 export { produceVerdict } from "./verdict-engine.js";
 export type { VerdictResult } from "./verdict-engine.js";

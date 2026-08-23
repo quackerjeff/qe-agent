@@ -66,6 +66,8 @@ export const EvidenceType = z.enum([
   "DIFF_ANALYSIS",
   "REQUIREMENT_MAPPING",
   "MANUAL_INFERENCE",
+  "DISCOVERY_RESULT",
+  "LIFECYCLE_OBSERVATION",
 ]);
 export type EvidenceType = z.infer<typeof EvidenceType>;
 

@@ -34,7 +34,8 @@ export async function runGitHubPublish(
 
   let config = getDefaultConfig();
   try {
-    config = await loadConfig(repoPath);
+    const loaded = await loadConfig(repoPath);
+    config = loaded.config;
   } catch {
     // No config — use defaults
   }

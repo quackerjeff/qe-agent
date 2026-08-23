@@ -32,11 +32,19 @@ coverage/
 # Durable QE configuration and project knowledge may be committed.
 # =============================================================================
 
+# QE runtime/generated state
+.qe/TESTING.md
+.qe/RISKS.md
+.qe/HISTORY.md
+.qe/knowledge/
 .qe/runs/
 .qe/cache/
 .qe/artifacts/
 .qe/screenshots/tmp/
 .qe/traces/
+
+# Keep QE configuration
+!.qe/config.yml
 
 
 # =============================================================================

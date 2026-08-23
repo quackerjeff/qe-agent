@@ -4,7 +4,11 @@ import { createLogger, StderrLogSink } from "../logging/index.js";
 import { loadConfig, getDefaultConfig } from "../config/index.js";
 import { QEOrchestrator } from "../core/orchestrator/index.js";
 import { formatQEReport } from "../core/orchestrator/index.js";
-import { createModelGateway } from "./gateway-factory.js";
+import {
+  createModelGateway,
+  resolveModelTokenLimit,
+  resolveModelTpmLimit,
+} from "./gateway-factory.js";
 import {
   parseRequirementsFile,
   parseInlineRequirements,
@@ -36,8 +40,11 @@ export async function runVerify(
   const repoPath = resolve(options.repo ?? process.cwd());
 
   let config = getDefaultConfig();
+  let explicitMaxModelCalls: number | undefined;
   try {
-    config = await loadConfig(repoPath);
+    const loaded = await loadConfig(repoPath);
+    config = loaded.config;
+    explicitMaxModelCalls = loaded.explicitMaxModelCalls;
   } catch {
     // No config — use defaults
   }
@@ -65,7 +72,9 @@ export async function runVerify(
   const orchestrator = new QEOrchestrator({
     gateway,
     logger: effectiveLogger,
-    maxModelCalls: config.reasoning.maxModelCalls,
+    maxModelCalls: explicitMaxModelCalls,
+    modelTokenLimit: resolveModelTokenLimit(config),
+    tpmLimit: resolveModelTpmLimit(config),
     memoryConfig: {
       enabled: config.memory.enabled,
       historySummaries: config.memory.historySummaries,

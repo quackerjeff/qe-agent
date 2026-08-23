@@ -27,7 +27,7 @@ export type TestGenerationDecision = z.infer<
   typeof TestGenerationDecisionSchema
 >;
 
-export const PROMPT_VERSION = "test-generation-v1.1";
+export const PROMPT_VERSION = "test-generation-v1.2";
 
 export function buildTestGenerationTask(
   context: {
@@ -47,6 +47,7 @@ export function buildTestGenerationTask(
     };
     riskLevel: string;
     changedFiles?: string[];
+    relevantSourcePaths?: string[];
     profile: string;
   },
   maxTests: number,
@@ -61,6 +62,7 @@ export function buildTestGenerationTask(
       existingTestConventions: context.testContext,
       riskLevel: context.riskLevel,
       changedFiles: context.changedFiles ?? [],
+      relevantSourcePaths: context.relevantSourcePaths ?? [],
       executionProfile: context.profile,
     },
     constraints: [
@@ -79,6 +81,7 @@ export function buildTestGenerationTask(
       "All proposed file paths MUST be test paths (tests/, test/, __tests__/, *.test.*, *.spec.*, etc).",
       "Do NOT propose modifications to files outside test infrastructure.",
       "PERMANENT_REGRESSION: for confirmed defects or high-value requirements. CANDIDATE: potentially useful but unproven. INVESTIGATIVE: temporary, for evidence gathering only.",
+      "Generated tests MUST NOT invent repository modules or source paths. Repository-relative imports must correspond to source paths supplied in relevantSourcePaths or existing test file imports shown in existingTestConventions.",
       `Maximum ${maxTests} test(s).`,
     ],
     outputSchema: TestGenerationDecisionSchema,

@@ -849,6 +849,7 @@ describe("M4 Schema Validation", () => {
         permanentTestsRetained: 1,
         candidateTestsRetained: 1,
         investigativeTestsRemoved: 0,
+        testDefectTestsRemoved: 0,
         modelCalls: 1,
         durationMs: 500,
       }).success,

@@ -6,3 +6,4 @@ export {
   ConfigValidationError,
   formatZodError,
 } from "./loader.js";
+export type { LoadConfigResult } from "./loader.js";

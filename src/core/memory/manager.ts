@@ -574,13 +574,21 @@ export class ProjectMemoryManager {
       // File doesn't exist yet
     }
 
+    const managedStart = "<!-- qe-managed:start -->";
+    const managedEnd = "<!-- qe-managed:end -->";
+
     if (!existingContent) {
+      if (
+        proposal.target === "TESTING" ||
+        proposal.target === "RISKS" ||
+        proposal.target === "KNOWLEDGE"
+      ) {
+        return `${managedStart}\n${proposal.content}\n${managedEnd}\n`;
+      }
       return proposal.content;
     }
 
     // For UPDATE operations on files with QE-managed sections, replace only those
-    const managedStart = "<!-- qe-managed:start -->";
-    const managedEnd = "<!-- qe-managed:end -->";
 
     if (
       existingContent.includes(managedStart) &&
@@ -596,18 +604,18 @@ export class ProjectMemoryManager {
       return `${beforeManaged}${managedStart}\n${proposal.content}\n${managedEnd}${afterManaged}`;
     }
 
-    // For RISKS.md with ADD operation, append new section
-    if (proposal.target === "RISKS" && proposal.operation === "ADD") {
-      return existingContent.trimEnd() + "\n\n" + proposal.content + "\n";
+    // For TESTING, RISKS, KNOWLEDGE: wrap in managed sections to prevent
+    // repeated appending of semantically similar run-outcome paragraphs.
+    if (
+      proposal.target === "TESTING" ||
+      proposal.target === "RISKS" ||
+      proposal.target === "KNOWLEDGE"
+    ) {
+      return `${existingContent.trimEnd()}\n\n${managedStart}\n${proposal.content}\n${managedEnd}\n`;
     }
 
-    // For UPDATE on existing files without managed sections, append
-    if (proposal.operation === "UPDATE") {
-      return existingContent.trimEnd() + "\n\n" + proposal.content + "\n";
-    }
-
-    // For ADD to files that already exist but have no managed sections
-    if (proposal.operation === "ADD") {
+    // For PROJECT, HISTORY: existing append behavior
+    if (proposal.operation === "UPDATE" || proposal.operation === "ADD") {
       return existingContent.trimEnd() + "\n\n" + proposal.content + "\n";
     }
 

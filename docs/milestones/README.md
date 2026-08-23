@@ -19,6 +19,8 @@ These documents are historical implementation records.
 - Milestone 4 — Test Generation & Retesting: Corrections Complete.
 - Milestone 5 — Browser QE & Playwright: Accepted.
 - Milestone 6 — Project-Local QE Memory: Accepted.
+- Milestone 7 — GitHub Actions & GitHub Reporting: Accepted.
+- Post-Milestone 7 Feature — Token and Cost Telemetry: Proposed.
 
 The Product Requirements, Technical Product Specification, AGENTS.md,
 and accepted ADRs remain the authoritative architectural and product

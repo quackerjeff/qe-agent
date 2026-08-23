@@ -54,10 +54,9 @@ export interface ReasoningContext {
   }[];
   instructions?: string;
   projectMemory?: {
+    _temporalNote?: string;
     project?: string;
-    testing?: string;
-    risks?: { topic: string; content: string }[];
-    knowledgeFiles?: { name: string; content: string }[];
+    historicalObservations?: { source: string; content: string }[];
   };
   truncation: ContextTruncation;
 }
@@ -78,6 +77,7 @@ export function buildReasoningContext(opts: {
   instructions?: string;
   projectMemory?: ProjectMemory;
   limits?: Partial<ContextLimits>;
+  excludeVolatileHistory?: boolean;
 }): ReasoningContext {
   const limits = { ...DEFAULT_LIMITS, ...opts.limits };
 
@@ -187,24 +187,49 @@ export function buildReasoningContext(opts: {
   if (opts.projectMemory) {
     const mem = opts.projectMemory;
     const maxMemBytes = 4096;
-    projectMemoryCtx = {};
+    projectMemoryCtx = {
+      _temporalNote:
+        "Project memory contains observations from prior QE runs. " +
+        "Execution outcomes (test pass/fail/timeout, command results) " +
+        "are historical and may not reflect current repository state.",
+    };
     if (mem.project) {
-      projectMemoryCtx.project = mem.project.content.slice(0, maxMemBytes);
+      projectMemoryCtx.project = stripManagedMarkers(
+        mem.project.content.slice(0, maxMemBytes),
+      );
     }
-    if (mem.testing) {
-      projectMemoryCtx.testing = mem.testing.content.slice(0, maxMemBytes);
-    }
-    if (mem.risks && mem.risks.entries.length > 0) {
-      projectMemoryCtx.risks = mem.risks.entries.map((e) => ({
-        topic: e.topic,
-        content: e.content.slice(0, 1024),
-      }));
-    }
-    if (mem.knowledgeFiles.length > 0) {
-      projectMemoryCtx.knowledgeFiles = mem.knowledgeFiles.map((k) => ({
-        name: k.name,
-        content: k.content.slice(0, 1024),
-      }));
+    if (!opts.excludeVolatileHistory) {
+      const historicalObs: { source: string; content: string }[] = [];
+      if (mem.testing) {
+        const content = stripManagedMarkers(
+          mem.testing.content.slice(0, maxMemBytes),
+        );
+        if (content.length > 0) {
+          historicalObs.push({ source: "TESTING", content });
+        }
+      }
+      if (mem.risks && mem.risks.entries.length > 0) {
+        for (const e of mem.risks.entries) {
+          const content = stripManagedMarkers(e.content.slice(0, 1024));
+          if (content.length > 0) {
+            historicalObs.push({ source: "RISKS", content });
+          }
+        }
+      }
+      if (mem.knowledgeFiles.length > 0) {
+        for (const k of mem.knowledgeFiles) {
+          const content = stripManagedMarkers(k.content.slice(0, 1024));
+          if (content.length > 0) {
+            historicalObs.push({
+              source: `KNOWLEDGE/${k.name}`,
+              content,
+            });
+          }
+        }
+      }
+      if (historicalObs.length > 0) {
+        projectMemoryCtx.historicalObservations = historicalObs;
+      }
     }
   }
 
@@ -217,5 +242,83 @@ export function buildReasoningContext(opts: {
     instructions,
     projectMemory: projectMemoryCtx,
     truncation,
+  };
+}
+
+export function stripManagedMarkers(content: string): string {
+  return content.replace(/<!-- qe-managed:(?:start|end) -->\n?/g, "").trim();
+}
+
+export function filterMemoryForDistillation(mem: ProjectMemory): ProjectMemory {
+  const filtered: ProjectMemory = {
+    knowledgeFiles: [],
+    historySummaries: mem.historySummaries,
+  };
+  if (mem.project) {
+    filtered.project = {
+      content: stripManagedMarkers(mem.project.content),
+      source: mem.project.source,
+    };
+  }
+  if (mem.testing) {
+    const { managed } = extractManagedContent(mem.testing.content);
+    if (managed) {
+      filtered.testing = {
+        content: managed,
+        source: mem.testing.source,
+      };
+    }
+  }
+  if (mem.risks) {
+    const filteredEntries = mem.risks.entries
+      .map((e) => {
+        const { managed } = extractManagedContent(e.content);
+        return {
+          topic: stripManagedMarkers(e.topic),
+          content: managed ?? "",
+        };
+      })
+      .filter((e) => e.topic.length > 0 || e.content.length > 0);
+    if (filteredEntries.length > 0) {
+      filtered.risks = { entries: filteredEntries, source: mem.risks.source };
+    }
+  }
+  for (const k of mem.knowledgeFiles) {
+    const { managed } = extractManagedContent(k.content);
+    if (managed) {
+      filtered.knowledgeFiles.push({
+        name: k.name,
+        content: managed,
+        source: k.source,
+      });
+    }
+  }
+  return filtered;
+}
+
+export function extractManagedContent(content: string): {
+  managed: string | null;
+  legacy: string | null;
+} {
+  const startMarker = "<!-- qe-managed:start -->";
+  const endMarker = "<!-- qe-managed:end -->";
+
+  const startIdx = content.indexOf(startMarker);
+  const endIdx = content.indexOf(endMarker);
+
+  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
+    const trimmed = content.trim();
+    return { managed: null, legacy: trimmed.length > 0 ? trimmed : null };
+  }
+
+  const managed = content.slice(startIdx + startMarker.length, endIdx).trim();
+  const before = content.slice(0, startIdx).trim();
+  const after = content.slice(endIdx + endMarker.length).trim();
+  const legacyParts = [before, after].filter((s) => s.length > 0);
+  const legacy = legacyParts.length > 0 ? legacyParts.join("\n\n") : null;
+
+  return {
+    managed: managed.length > 0 ? managed : null,
+    legacy,
   };
 }

@@ -13,7 +13,7 @@ export const VerdictRecommendationOutputSchema = z.object({
   reasoning: z.string(),
   concerns: z.array(z.string()),
   recommendedNextActions: z.array(z.string()),
-  summary: z.string(),
+  summary: z.string().optional(),
 });
 
 export type VerdictRecommendationOutput = z.infer<
@@ -38,7 +38,14 @@ export function buildVerdictTask(
     status: string;
     explanation: string;
   }[],
-  evidence: { id: string; type: string; status: string; summary: string }[],
+  evidence: {
+    id: string;
+    type: string;
+    status: string;
+    summary: string;
+    details?: Record<string, unknown>;
+    investigatedClassification?: string;
+  }[],
   budgetExhausted: boolean,
 ): ReasoningTask<VerdictRecommendationOutput> {
   return {
@@ -64,6 +71,9 @@ export function buildVerdictTask(
       "PASS requires no material defect identified AND available evidence strongly supports expected behavior.",
       "Do not assume implementation correctness.",
       "Separate inference from execution evidence.",
+      "If evidence has investigatedClassification: FLAKY_TEST, the failure was classified as likely flaky by failure investigation and does not demonstrate a product defect. Flaky-classified failures should not independently justify FAIL or BLOCKED.",
+      "Do not classify a test failure by test type (integration, e2e, API, browser, component, contract) unless the evidence explicitly contains test-category provenance. A generic command failure such as 'npm run test failed' must be described generically (e.g., 'repository test suite failure') — unknown test category is not integration.",
+      "Risk assessment inferences (security sensitivity, data sensitivity, authentication concerns) are not validation findings. Do not present inferred risks as demonstrated defects in the summary or concerns unless specific execution evidence or findings substantiate them.",
     ],
     maxTokens: 2048,
     promptVersion: PROMPT_VERSION,

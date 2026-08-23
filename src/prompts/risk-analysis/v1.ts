@@ -47,6 +47,7 @@ export function buildRiskAnalysisTask(
       "Do not assume implementation correctness.",
       "Attempt to identify what could break.",
       "Report uncertainty.",
+      "Project memory describes observations from prior QE runs. Execution outcomes in memory (test pass/fail/timeout, command success/failure) are historical — they may not reflect current state. Do not state that tests currently fail or that a current defect exists based solely on historical memory. Historical observations may inform uncertainty or validation priority but must not be presented as current execution evidence.",
     ],
     maxTokens: 2048,
     promptVersion: PROMPT_VERSION,

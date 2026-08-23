@@ -1,0 +1,37 @@
+# QE Agent Configuration
+# See documentation for available options.
+# Some sections below configure capabilities implemented in later milestones.
+# They are accepted now so configuration can be prepared ahead of those features.
+version: 1
+profile: standard
+execution:
+  mode: auto
+  maxMinutes: 20
+  commandTimeoutSeconds: 300
+  maxOutputBytes: 1048576
+tests:
+  generation: true
+  commitPermanentTests: true
+browser:
+  enabled: auto
+  headless: true
+ci:
+  failOn:
+    - FAIL
+    - BLOCKED
+github:
+  checks:
+    enabled: true
+  issues:
+    enabled: false
+    minimumSeverity: HIGH
+    minimumConfidence: 0.8
+  dryRun: false
+memory:
+  enabled: true
+  historySummaries: true
+model:
+  provider: openai
+  model: gpt-4o-mini
+reasoning:
+  maxModelCalls: 12

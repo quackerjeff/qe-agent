@@ -30,7 +30,8 @@ export async function runExec(
 
   let config = getDefaultConfig();
   try {
-    config = await loadConfig(repoPath);
+    const loaded = await loadConfig(repoPath);
+    config = loaded.config;
   } catch {
     // No config file or invalid — use defaults
   }

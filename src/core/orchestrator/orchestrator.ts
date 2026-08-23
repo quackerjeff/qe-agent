@@ -22,9 +22,25 @@ import type {
 import { QEResultSchema } from "../../types/index.js";
 import { createExecutionId } from "../../logging/index.js";
 import { QEStateMachine } from "../lifecycle/index.js";
-import { BudgetManager, createBudgetForProfile } from "./budget-manager.js";
-import { BudgetAwareGateway } from "./budget-aware-gateway.js";
-import { buildReasoningContext } from "./context-builder.js";
+import {
+  BudgetManager,
+  createBudgetForProfile,
+  VERDICT_TIME_RESERVE_MS,
+} from "./budget-manager.js";
+import {
+  BudgetAwareGateway,
+  MIN_MODEL_CALL_TIMEOUT_MS,
+} from "./budget-aware-gateway.js";
+import {
+  buildReasoningContext,
+  filterMemoryForDistillation,
+} from "./context-builder.js";
+import {
+  buildDeterministicGrounding,
+  createDiscoveryEvidence,
+  createLifecycleEvidence,
+  mergeGroundingWithModelAssessments,
+} from "./deterministic-grounding.js";
 import {
   collectDiff,
   getCurrentRef,
@@ -54,7 +70,12 @@ import {
   investigateFailure,
   classifyWithBaseline,
 } from "../reasoning/failure-investigator.js";
-import { analyzeGaps } from "../reasoning/gap-analyzer.js";
+import {
+  analyzeGaps,
+  analyzeGapsChunked,
+  chunkRequirements,
+  MAX_REQUIREMENTS_PER_GAP_CHUNK,
+} from "../reasoning/gap-analyzer.js";
 import { produceVerdict } from "../reasoning/verdict-engine.js";
 import { generateAndExecuteTests } from "../test-generation/index.js";
 import type { BrowserCapability } from "../browser/capability.js";
@@ -78,11 +99,18 @@ import type {
   MemoryMetrics,
 } from "../memory/types.js";
 import { buildMemoryDistillationTask } from "../../prompts/memory-distillation/v1.js";
+import {
+  persistDiagnostics,
+  type RunDiagnostics,
+  type GapChunkDiagnostic,
+} from "./diagnostics.js";
 
 export interface QEOrchestratorOptions {
   gateway: ModelGateway;
   logger?: Logger;
   maxModelCalls?: number;
+  modelTokenLimit?: number;
+  tpmLimit?: number;
   repositoryProfile?: RepositoryProfile;
   controller?: ExecutionController;
   browserCapability?: BrowserCapability;
@@ -103,6 +131,8 @@ export class QEOrchestrator {
   private readonly gateway: ModelGateway;
   private readonly logger?: Logger;
   private readonly maxModelCalls?: number;
+  private readonly modelTokenLimit?: number;
+  private readonly tpmLimit?: number;
   private readonly injectedProfile?: RepositoryProfile;
   private readonly injectedController?: ExecutionController;
   private readonly browserCapability?: BrowserCapability;
@@ -114,6 +144,8 @@ export class QEOrchestrator {
     this.gateway = options.gateway;
     this.logger = options.logger;
     this.maxModelCalls = options.maxModelCalls;
+    this.modelTokenLimit = options.modelTokenLimit;
+    this.tpmLimit = options.tpmLimit;
     this.injectedProfile = options.repositoryProfile;
     this.injectedController = options.controller;
     this.browserCapability = options.browserCapability;
@@ -130,7 +162,14 @@ export class QEOrchestrator {
       createBudgetForProfile(request.profile, this.maxModelCalls),
     );
 
-    const budgetGateway = new BudgetAwareGateway(this.gateway, budget, 2);
+    budget.callDeadlineReserveMs = VERDICT_TIME_RESERVE_MS;
+    budget.reserveVerdictCall();
+
+    const budgetGateway = new BudgetAwareGateway(this.gateway, budget, {
+      maxRetriesPerCall: 2,
+      modelTokenLimit: this.modelTokenLimit,
+      tpmLimit: this.tpmLimit,
+    });
 
     const evidence: Evidence[] = [];
     const findings: Finding[] = [];
@@ -153,6 +192,7 @@ export class QEOrchestrator {
     let generatedTestChanges: GeneratedTestChange[] = [];
     let testGenerationMetrics: TestGenerationMetrics | undefined;
     let memoryUpdateResults: MemoryUpdateResult[] = [];
+    let gapChunkDiagnostics: GapChunkDiagnostic[] = [];
     const memoryWarnings: MemoryWarning[] = [];
     let projectMemory: ProjectMemory = {
       knowledgeFiles: [],
@@ -185,6 +225,16 @@ export class QEOrchestrator {
         : await analyzeRepository({
             targetPath: request.repositoryPath,
           });
+
+      evidence.push(...createDiscoveryEvidence(repositoryProfile));
+      evidence.push(
+        ...createLifecycleEvidence({
+          invocationMode: "cli",
+          budgetActive: true,
+          budgetMaxDurationMs: budget.budget.maxDurationMs,
+          budgetMaxModelCalls: budget.budget.maxModelCalls,
+        }),
+      );
 
       // Load project memory early to influence reasoning
       if (memoryEnabled) {
@@ -266,13 +316,17 @@ export class QEOrchestrator {
         });
 
         if (budget.canAffordModelCall()) {
-          const { analysis } = await analyzeChange(
-            budgetGateway,
-            ctx,
-            diffData,
-          );
-          budget.recordModelCall();
-          changeAnalysis = analysis;
+          try {
+            const { analysis } = await analyzeChange(
+              budgetGateway,
+              ctx,
+              diffData,
+            );
+            budget.recordModelCall();
+            changeAnalysis = analysis;
+          } catch {
+            changeAnalysis = buildDeterministicChangeAnalysis(diffData);
+          }
         } else {
           changeAnalysis = buildDeterministicChangeAnalysis(diffData);
         }
@@ -297,16 +351,36 @@ export class QEOrchestrator {
         diffData,
         evidence,
         projectMemory: memoryEnabled ? projectMemory : undefined,
+        excludeVolatileHistory: true,
       });
 
       if (budget.canAffordModelCall()) {
-        const { assessment } = await assessRisk(
-          budgetGateway,
-          riskCtx,
-          changeAnalysis,
-        );
-        budget.recordModelCall();
-        riskAssessment = assessment;
+        try {
+          const { assessment } = await assessRisk(
+            budgetGateway,
+            riskCtx,
+            changeAnalysis,
+          );
+          budget.recordModelCall();
+          riskAssessment = assessment;
+        } catch (riskErr) {
+          this.logger?.warn("Risk assessment timed out or failed", {
+            executionId,
+            error: riskErr instanceof Error ? riskErr.message : String(riskErr),
+          });
+          riskAssessment = {
+            level: "MEDIUM",
+            factors: [
+              {
+                factor: "budget_timeout",
+                reason: "Risk assessment did not complete within budget",
+                weight: "medium",
+              },
+            ],
+            confidence: 0.3,
+            summary: "Risk assessment limited due to budget timeout",
+          };
+        }
       } else {
         riskAssessment = {
           level: "MEDIUM",
@@ -338,19 +412,32 @@ export class QEOrchestrator {
       });
 
       if (budget.canAffordModelCall()) {
-        const { plan } = await planValidation(
-          budgetGateway,
-          planCtx,
-          riskAssessment,
-          request.profile,
-          repositoryProfile.commands,
-        );
-        budget.recordModelCall();
-        validationPlan = plan;
-        validationPlan.plannedActions = applyProfileLimits(
-          validationPlan.plannedActions,
-          request.profile,
-        );
+        try {
+          const { plan } = await planValidation(
+            budgetGateway,
+            planCtx,
+            riskAssessment,
+            request.profile,
+            repositoryProfile.commands,
+          );
+          budget.recordModelCall();
+          validationPlan = plan;
+          validationPlan.plannedActions = applyProfileLimits(
+            validationPlan.plannedActions,
+            request.profile,
+          );
+        } catch (planErr) {
+          this.logger?.warn("Validation planning timed out or failed", {
+            executionId,
+            error: planErr instanceof Error ? planErr.message : String(planErr),
+          });
+          validationPlan = {
+            objectives: [],
+            plannedActions: [],
+            identifiedRisks: ["Planning did not complete within budget"],
+            expectedCapabilities: [],
+          };
+        }
       } else {
         validationPlan = {
           objectives: [],
@@ -534,27 +621,170 @@ export class QEOrchestrator {
       }
       this.logger?.info("Analyzing gaps", { executionId, state: sm.state });
 
+      let groundingResults: ReturnType<typeof buildDeterministicGrounding> = [];
+      const groundingCtx = repositoryProfile
+        ? {
+            repositoryProfile,
+            evidence,
+            requirements: request.requirements ?? [],
+            budgetActive: true,
+          }
+        : undefined;
+
+      if (groundingCtx && (request.requirements?.length ?? 0) > 0) {
+        groundingResults = buildDeterministicGrounding(groundingCtx);
+      }
+
       if (
         budget.canAffordModelCall() &&
         (request.requirements?.length ?? 0) > 0
       ) {
-        const gapResult = await analyzeGaps(
-          budgetGateway,
+        const reqCount = request.requirements!.length;
+        const chunks = chunkRequirements(
           request.requirements!,
-          evidence,
-          findings,
-          riskAssessment,
-          diffData ? { changedFiles: diffData.changedFiles } : undefined,
+          MAX_REQUIREMENTS_PER_GAP_CHUNK,
         );
-        budget.recordModelCall();
-        remainingGaps = gapResult.gaps;
-        requirementAssessments = gapResult.requirementAssessments;
 
-        // Correction 5: Validate model-supplied evidence references
-        requirementAssessments = validateEvidenceReferences(
-          requirementAssessments,
-          evidence,
-        );
+        if (chunks.length <= 1) {
+          try {
+            const gapResult = await analyzeGaps(
+              budgetGateway,
+              request.requirements!,
+              evidence,
+              findings,
+              riskAssessment,
+              diffData ? { changedFiles: diffData.changedFiles } : undefined,
+            );
+            budget.recordModelCall();
+            remainingGaps = gapResult.gaps;
+            requirementAssessments = gapResult.requirementAssessments;
+
+            gapChunkDiagnostics = [
+              {
+                chunkIndex: 0,
+                requestedRequirementIds: request.requirements!.map((r) => r.id),
+                success: true,
+                rawAssessments: gapResult.requirementAssessments.map((a) => ({
+                  requirementId: a.requirementId,
+                  status: a.status,
+                  evidenceIds: [...a.evidenceIds],
+                  explanation: a.explanation,
+                })),
+                rawGaps: gapResult.gaps.map((g) => ({
+                  area: g.area,
+                  description: g.description,
+                  reason: g.reason,
+                  risk: g.risk,
+                })),
+              },
+            ];
+
+            requirementAssessments = validateEvidenceReferences(
+              requirementAssessments,
+              evidence,
+            );
+          } catch (gapErr) {
+            gapChunkDiagnostics = [
+              {
+                chunkIndex: 0,
+                requestedRequirementIds: request.requirements!.map((r) => r.id),
+                success: false,
+                errorClass:
+                  gapErr instanceof Error ? gapErr.constructor.name : "Unknown",
+                errorMessage:
+                  gapErr instanceof Error
+                    ? gapErr.message.slice(0, 500)
+                    : String(gapErr).slice(0, 500),
+              },
+            ];
+            this.logger?.warn("Gap analysis timed out or failed", {
+              executionId,
+              error: gapErr instanceof Error ? gapErr.message : String(gapErr),
+            });
+            const passExecutionEvidenceIds = evidence
+              .filter((e) => e.provenance === "executed" && e.status === "PASS")
+              .map((e) => e.id);
+            requirementAssessments = (request.requirements ?? []).map((r) => ({
+              requirementId: r.id,
+              status: "NOT_VERIFIED" as const,
+              evidenceIds: passExecutionEvidenceIds,
+              explanation:
+                passExecutionEvidenceIds.length > 0
+                  ? "Gap analysis timed out; repository-level validation passed but requirement-specific assessment could not be completed"
+                  : "Gap analysis timed out; no execution evidence available for assessment",
+            }));
+            remainingGaps = [
+              {
+                area: "Gap Analysis",
+                description:
+                  "Requirement-to-evidence gap analysis did not complete within the execution budget.",
+                reason:
+                  "Primary gap analysis model call timed out before completing requirement assessments",
+                risk: "MEDIUM" as const,
+              },
+            ];
+          }
+        } else {
+          let chunksReserved = budget.reserveModelCalls(chunks.length);
+
+          // Pre-dispatch time admission: skip all chunks when the
+          // effective gap timeout is below the gateway's minimum.
+          // Prevents dispatching chunks that will fail with
+          // InsufficientTimeout and waste the shared retry budget.
+          const effectiveGapTimeoutMs =
+            budget.remainingMs - budget.callDeadlineReserveMs;
+          if (effectiveGapTimeoutMs < MIN_MODEL_CALL_TIMEOUT_MS) {
+            for (let i = 0; i < chunksReserved; i++) {
+              budget.releaseReservation();
+            }
+            chunksReserved = 0;
+            this.logger?.warn(
+              "Gap chunks skipped: insufficient time for dispatch",
+              {
+                executionId,
+                remainingMs: budget.remainingMs,
+                chunksSkipped: chunks.length,
+              },
+            );
+          }
+
+          this.logger?.info("Chunking gap analysis", {
+            executionId,
+            requirementCount: reqCount,
+            chunkCount: chunks.length,
+            chunksReserved,
+            chunkSize: MAX_REQUIREMENTS_PER_GAP_CHUNK,
+          });
+
+          const chunkedResult = await analyzeGapsChunked(
+            budgetGateway,
+            request.requirements!,
+            evidence,
+            findings,
+            riskAssessment,
+            diffData ? { changedFiles: diffData.changedFiles } : undefined,
+            chunksReserved,
+            () => budget.consumeReservation(),
+            () => budget.releaseReservation(),
+            this.logger
+              ? {
+                  info: (msg, ctx) => this.logger!.info(msg, ctx),
+                  warn: (msg, ctx) => this.logger!.warn(msg, ctx),
+                }
+              : undefined,
+          );
+
+          remainingGaps = chunkedResult.gaps;
+          requirementAssessments = chunkedResult.requirementAssessments;
+          if (chunkedResult.chunkDiagnostics) {
+            gapChunkDiagnostics = chunkedResult.chunkDiagnostics;
+          }
+
+          requirementAssessments = validateEvidenceReferences(
+            requirementAssessments,
+            evidence,
+          );
+        }
       } else if ((request.requirements?.length ?? 0) > 0) {
         requirementAssessments = (request.requirements ?? []).map((r) => ({
           requirementId: r.id,
@@ -562,6 +792,18 @@ export class QEOrchestrator {
           evidenceIds: [],
           explanation: "Budget exhausted before gap analysis",
         }));
+      }
+
+      if (
+        groundingResults.length > 0 &&
+        requirementAssessments.length > 0 &&
+        request.requirements
+      ) {
+        requirementAssessments = mergeGroundingWithModelAssessments(
+          groundingResults,
+          requirementAssessments,
+          request.requirements,
+        );
       }
 
       // BROWSER_VALIDATING (conditional)
@@ -1020,24 +1262,35 @@ export class QEOrchestrator {
           );
 
           if (
-            budget.canAffordModelCall() &&
+            budget.canAffordOptionalModelCall() &&
             (request.requirements?.length ?? 0) > 0
           ) {
-            const gapResult = await analyzeGaps(
-              budgetGateway,
-              request.requirements!,
-              evidence,
-              findings,
-              riskAssessment,
-              diffData ? { changedFiles: diffData.changedFiles } : undefined,
-            );
-            budget.recordModelCall();
-            remainingGaps = gapResult.gaps;
-            requirementAssessments = gapResult.requirementAssessments;
-            requirementAssessments = validateEvidenceReferences(
-              requirementAssessments,
-              evidence,
-            );
+            try {
+              const gapResult = await analyzeGaps(
+                budgetGateway,
+                request.requirements!,
+                evidence,
+                findings,
+                riskAssessment,
+                diffData ? { changedFiles: diffData.changedFiles } : undefined,
+              );
+              budget.recordModelCall();
+              remainingGaps = gapResult.gaps;
+              requirementAssessments = gapResult.requirementAssessments;
+              requirementAssessments = validateEvidenceReferences(
+                requirementAssessments,
+                evidence,
+              );
+            } catch (gapErr) {
+              this.logger?.warn(
+                "Re-gap-analysis after browser validation timed out; preserving prior assessments",
+                {
+                  executionId,
+                  error:
+                    gapErr instanceof Error ? gapErr.message : String(gapErr),
+                },
+              );
+            }
           }
         }
       }
@@ -1050,7 +1303,7 @@ export class QEOrchestrator {
         maxGenTests > 0 &&
         hasGaps &&
         hasRequirements &&
-        budget.canAffordModelCall() &&
+        budget.canAffordOptionalModelCall() &&
         sm.canTransitionTo("GENERATING_TESTS");
 
       if (shouldGenerate) {
@@ -1078,6 +1331,7 @@ export class QEOrchestrator {
           repositoryPath: request.repositoryPath,
           maxGeneratedTests: maxGenTests,
           changedFiles: diffData?.changedFiles.map((f) => f.path),
+          budget,
           logger: this.logger,
         });
 
@@ -1092,8 +1346,12 @@ export class QEOrchestrator {
           findings.push(f);
         }
 
-        // RETESTING
-        if (genResult.changes.some((c) => c.writeOutcome === "APPLIED")) {
+        // RETESTING — only when at least one generated test remains retained
+        if (
+          genResult.changes.some(
+            (c) => c.writeOutcome === "APPLIED" && c.retained,
+          )
+        ) {
           sm.transition("RETESTING", "Retest after generation");
           this.logger?.info("Retesting existing coverage", {
             executionId,
@@ -1105,14 +1363,17 @@ export class QEOrchestrator {
             .slice(0, 2);
 
           for (const action of retestActions) {
-            if (!budget.canAffordExecution(action.estimatedDurationMs)) break;
+            if (!budget.canAffordOptionalExecution(action.estimatedDurationMs))
+              break;
             if (!action.command) continue;
 
             const proposal: CommandProposal = {
               executable: action.command.executable,
               args: action.command.args,
               workingDirectory: action.command.workingDirectory,
-              timeoutMs: Math.min(action.command.timeoutMs, budget.remainingMs),
+              timeoutMs: budget.optionalExecutionTimeoutMs(
+                action.command.timeoutMs,
+              ),
               purpose: `Retest: ${action.purpose}`,
               mutability: "READ_ONLY",
               network: "ALLOWED",
@@ -1132,64 +1393,111 @@ export class QEOrchestrator {
           }
         }
 
-        // Re-analyze gaps after test generation + retesting
+        // Transition out of GENERATING_TESTS so FORMING_VERDICT is reachable
+        if (sm.canTransitionTo("ANALYZING_GAPS")) {
+          sm.transition("ANALYZING_GAPS", "Re-analyze gaps after generation");
+        }
+
+        // Only perform the re-gap model call when generation produced evidence
+        // that could materially change requirement assessment
+        const generationProducedMaterialEvidence =
+          genResult.changes.some(
+            (c) => c.writeOutcome === "APPLIED" && c.retained,
+          ) ||
+          genResult.newEvidence.some(
+            (e) =>
+              e.status === "PASS" ||
+              (e.status === "FAIL" &&
+                e.generatedTestProvenance?.failureClassification !==
+                  "TEST_DEFECT"),
+          );
+
         if (
-          sm.canTransitionTo("ANALYZING_GAPS") &&
-          budget.canAffordModelCall() &&
+          generationProducedMaterialEvidence &&
+          budget.canAffordOptionalModelCall() &&
           (request.requirements?.length ?? 0) > 0
         ) {
-          sm.transition("ANALYZING_GAPS", "Re-analyze gaps after generation");
           this.logger?.info("Re-analyzing gaps", {
             executionId,
             state: sm.state,
           });
 
-          const gapResult = await analyzeGaps(
-            budgetGateway,
-            request.requirements!,
-            evidence,
-            findings,
-            riskAssessment,
-            diffData ? { changedFiles: diffData.changedFiles } : undefined,
-          );
-          budget.recordModelCall();
-          remainingGaps = gapResult.gaps;
-          requirementAssessments = gapResult.requirementAssessments;
-          requirementAssessments = validateEvidenceReferences(
-            requirementAssessments,
-            evidence,
-          );
+          try {
+            const gapResult = await analyzeGaps(
+              budgetGateway,
+              request.requirements!,
+              evidence,
+              findings,
+              riskAssessment,
+              diffData ? { changedFiles: diffData.changedFiles } : undefined,
+            );
+            budget.recordModelCall();
+            remainingGaps = gapResult.gaps;
+            requirementAssessments = gapResult.requirementAssessments;
+            requirementAssessments = validateEvidenceReferences(
+              requirementAssessments,
+              evidence,
+            );
+          } catch (gapErr) {
+            this.logger?.warn(
+              "Re-gap-analysis after test generation timed out; preserving prior assessments",
+              {
+                executionId,
+                error:
+                  gapErr instanceof Error ? gapErr.message : String(gapErr),
+              },
+            );
+          }
         }
       }
 
       // FORMING_VERDICT
+      budget.callDeadlineReserveMs = 0;
+      budget.releaseVerdictReservation();
       sm.transition("FORMING_VERDICT", "Form verdict");
       this.logger?.info("Forming verdict", { executionId, state: sm.state });
 
       if (budget.canAffordModelCall()) {
-        const verdictResult = await produceVerdict(
-          budgetGateway,
-          request.requirements ?? [],
-          findings,
-          riskAssessment,
-          remainingGaps,
-          requirementAssessments,
-          evidence,
-          budget.exhausted,
-        );
-        budget.recordModelCall();
-        verdictValue = verdictResult.verdict;
-        confidenceValue = verdictResult.confidence;
-        summaryValue = verdictResult.summary;
-        recommendedNextActions = verdictResult.recommendedNextActions;
+        try {
+          const verdictResult = await produceVerdict(
+            budgetGateway,
+            request.requirements ?? [],
+            findings,
+            riskAssessment,
+            remainingGaps,
+            requirementAssessments,
+            evidence,
+            budget.exhausted,
+          );
+          budget.recordModelCall();
+          verdictValue = verdictResult.verdict;
+          confidenceValue = verdictResult.confidence;
+          summaryValue = verdictResult.summary;
+          recommendedNextActions = verdictResult.recommendedNextActions;
 
-        if (verdictResult.overrideApplied) {
-          this.logger?.warn("Verdict guardrail applied", {
-            reason: verdictResult.overrideReason,
-            modelRecommended:
-              verdictResult.modelRecommendation.recommendedVerdict,
-            finalVerdict: verdictResult.verdict,
+          if (verdictResult.overrideApplied) {
+            this.logger?.warn("Verdict guardrail applied", {
+              reason: verdictResult.overrideReason,
+              modelRecommended:
+                verdictResult.modelRecommendation.recommendedVerdict,
+              finalVerdict: verdictResult.verdict,
+            });
+          }
+        } catch (verdictErr) {
+          this.logger?.error("Verdict formation failed", {
+            executionId,
+            error:
+              verdictErr instanceof Error
+                ? verdictErr.message
+                : String(verdictErr),
           });
+          verdictValue = "BLOCKED";
+          confidenceValue = "LOW";
+          summaryValue =
+            "Verdict formation timed out; validation evidence was collected but could not be fully assessed.";
+          recommendedNextActions = [
+            "Re-run with a larger time budget to allow verdict formation to complete",
+          ];
         }
       } else {
         verdictValue = "BLOCKED";
@@ -1251,7 +1559,7 @@ export class QEOrchestrator {
             ),
             riskSummary: riskAssessment?.summary,
             changeAnalysisSummary: changeAnalysis?.summary,
-            existingMemory: projectMemory,
+            existingMemory: filterMemoryForDistillation(projectMemory),
           });
 
           const distillResult = await budgetGateway.reason(distillationTask);
@@ -1450,13 +1758,41 @@ export class QEOrchestrator {
       summary: summaryValue,
       recommendedNextActions,
       metrics,
+      aiUsage: budgetGateway.aggregateUsage(),
     };
 
     QEResultSchema.parse(result);
 
+    try {
+      const diagnostics: RunDiagnostics = {
+        executionId,
+        timestamp: new Date().toISOString(),
+        providerAttempts: budgetGateway.diagnosticAttempts,
+        gapChunks: gapChunkDiagnostics,
+      };
+      await persistDiagnostics(
+        diagnostics,
+        request.repositoryPath,
+        this.knownSecrets,
+      );
+    } catch (diagErr) {
+      this.logger?.warn("Failed to persist run diagnostics", {
+        executionId,
+        error: diagErr instanceof Error ? diagErr.message : String(diagErr),
+      });
+    }
+
     return result;
   }
 }
+
+export {
+  sanitizeEvidenceDetails,
+  projectEvidenceForModel,
+  isAuthoritativeVerificationEvidence,
+} from "./evidence-projection.js";
+
+import { isAuthoritativeVerificationEvidence } from "./evidence-projection.js";
 
 function validateEvidenceReferences(
   assessments: RequirementAssessment[],
@@ -1466,20 +1802,20 @@ function validateEvidenceReferences(
 
   return assessments.map((a) => {
     const validIds = a.evidenceIds.filter((id) => evidenceIds.has(id));
-    const hasExecutedEvidence = validIds.some((id) => {
+    const hasAuthoritativeEvidence = validIds.some((id) => {
       const ev = evidence.find((e) => e.id === id);
-      return ev && ev.provenance === "executed";
+      return ev != null && isAuthoritativeVerificationEvidence(ev);
     });
 
     if (
       a.status === "VERIFIED" &&
-      (!hasExecutedEvidence || validIds.length === 0)
+      (!hasAuthoritativeEvidence || validIds.length === 0)
     ) {
       return {
         ...a,
         evidenceIds: validIds,
         status: "NOT_VERIFIED" as const,
-        explanation: `${a.explanation} [Downgraded: insufficient executed evidence for VERIFIED status]`,
+        explanation: `${a.explanation} [Downgraded: insufficient authoritative evidence for VERIFIED status]`,
       };
     }
 

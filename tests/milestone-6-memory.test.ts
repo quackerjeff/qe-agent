@@ -185,14 +185,15 @@ describe("Milestone 6 — Project Memory", () => {
         const result2 = await runQE(dir, gw2);
         expect(result2.verdict).toBeDefined();
 
-        // Verify the second run loaded memory and passed it to reasoning
+        // Risk analyst receives project memory but NOT volatile history
         const riskCall = gw2.calls.find((c) => c.role === "risk_analyst");
         expect(riskCall).toBeDefined();
         const ctx = riskCall!.context as Record<string, unknown>;
         expect(ctx.projectMemory).toBeDefined();
         const memCtx = ctx.projectMemory as Record<string, unknown>;
-        expect(memCtx.testing).toBeDefined();
-        expect(String(memCtx.testing)).toContain("npm test");
+        // Volatile history structurally excluded from risk analyst
+        expect(memCtx.historicalObservations).toBeUndefined();
+        expect(memCtx._temporalNote).toBeDefined();
       },
       TEST_TIMEOUT,
     );
@@ -2106,8 +2107,9 @@ Additional human content here.
           const ctx = riskCall!.context as Record<string, unknown>;
           expect(ctx.projectMemory).toBeDefined();
           const memCtx = ctx.projectMemory as Record<string, unknown>;
-          expect(memCtx.testing).toBeDefined();
-          expect(String(memCtx.testing)).toContain("npm test");
+          // Volatile history structurally excluded from risk analyst
+          expect(memCtx.historicalObservations).toBeUndefined();
+          expect(memCtx._temporalNote).toBeDefined();
         } finally {
           rmSync(dir, { recursive: true, force: true });
         }

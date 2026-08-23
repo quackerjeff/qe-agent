@@ -88,6 +88,8 @@ export function buildMemoryDistillationTask(
       "Content must be valid Markdown suitable for human reading.",
       "Do NOT include file paths outside the .qe/ directory.",
       "Maximum 6 proposals per run.",
+      "When updating TESTING, RISKS, or KNOWLEDGE targets, provide one canonical current observation per topic. Do not add semantically duplicate paragraphs restating the same observation in different words. Use UPDATE to replace stale observations rather than ADD to append.",
+      "Existing memory fields (testing, risks, knowledge) contain observations from prior QE runs. These are historical context, not current repository state. Do not re-state prior observations as if they are current truths. Base new proposals on current-run evidence only.",
     ],
     maxTokens: 2048,
     promptVersion: PROMPT_VERSION,

@@ -121,5 +121,49 @@ export function formatQEReport(result: QEResult): string {
   lines.push(`  State transitions:  ${result.metrics.stateTransitions}`);
   lines.push("");
 
+  if (result.aiUsage) {
+    const u = result.aiUsage;
+    lines.push("## AI Usage");
+    if (u.failedModelCalls > 0) {
+      lines.push(
+        `  Model calls:        ${u.modelCalls} (${u.failedModelCalls} failed)`,
+      );
+    } else {
+      lines.push(`  Model calls:        ${u.modelCalls}`);
+    }
+    lines.push(
+      `  Input tokens:       ${u.inputTokens.toLocaleString("en-US")}`,
+    );
+    lines.push(
+      `  Output tokens:      ${u.outputTokens.toLocaleString("en-US")}`,
+    );
+    if (u.cachedTokens > 0) {
+      lines.push(
+        `  Cached tokens:      ${u.cachedTokens.toLocaleString("en-US")}`,
+      );
+    }
+    if (u.estimatedCost !== undefined) {
+      lines.push(`  Estimated cost:     $${u.estimatedCost.toFixed(2)}`);
+    }
+    if (u.throughputLimit !== undefined) {
+      lines.push(
+        `  Throughput limit:   ${u.throughputLimit.toLocaleString("en-US")} TPM`,
+      );
+    }
+    if (u.limitStatus !== "OK" && u.limitStatus !== "UNKNOWN") {
+      lines.push(`  Limit status:       ${u.limitStatus}`);
+    }
+    if (u.limitClassification) {
+      lines.push(`  Limit class:        ${u.limitClassification}`);
+    }
+    if (u.throughputActions && u.throughputActions.length > 0) {
+      lines.push("  Throughput actions:");
+      for (const a of u.throughputActions) {
+        lines.push(`    [${a.action}] ${a.reason}`);
+      }
+    }
+    lines.push("");
+  }
+
   return lines.join("\n");
 }

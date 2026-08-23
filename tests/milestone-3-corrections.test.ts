@@ -475,7 +475,7 @@ describe("Correction 6: Lifecycle Transition History", () => {
     }
   });
 
-  it("BLOCKED transition is recorded", async () => {
+  it("all-failing gateway produces BLOCKED verdict but completes lifecycle", async () => {
     const gateway = new FakeModelGateway(() => undefined);
     const orchestrator = new QEOrchestrator({
       gateway,
@@ -490,11 +490,12 @@ describe("Correction 6: Lifecycle Transition History", () => {
       mode: "repository",
     });
 
+    expect(result.verdict).toBe("BLOCKED");
     const lastTransition =
       result.metrics.lifecycleHistory![
         result.metrics.lifecycleHistory!.length - 1
       ];
-    expect(lastTransition.to).toBe("BLOCKED");
+    expect(lastTransition.to).toBe("COMPLETE");
   });
 
   it("state machine rejects invalid transitions", () => {
@@ -624,7 +625,8 @@ describe("Correction 8: Budget Retries", () => {
 
     await budgetGateway.reason(task);
     expect(budget.retries).toBeGreaterThan(0);
-    expect(budget.modelCalls).toBeGreaterThan(0);
+    // Retries are tracked via retry budget, not logical model-call budget
+    expect(budget.modelCalls).toBe(0);
   });
 
   it("budget exhaustion stops retries", async () => {
@@ -1670,7 +1672,8 @@ describe("Retry Budget Fully Accounted", () => {
     expect(budgetGateway.callMetadata[0].success).toBe(false);
     expect(budgetGateway.callMetadata[1].success).toBe(true);
     expect(budget.retries).toBe(1);
-    expect(budget.modelCalls).toBe(1);
+    // Retries do not consume logical model-call budget
+    expect(budget.modelCalls).toBe(0);
   });
 
   it("fails until budget exhausted, no additional attempts", async () => {

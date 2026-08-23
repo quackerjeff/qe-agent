@@ -84,6 +84,9 @@ export const EvidenceSchema = z.object({
     .optional(),
   relatedRequirementIds: z.array(z.string()).optional(),
   relatedFindingIds: z.array(z.string()).optional(),
+  generatedTestProvenance: z
+    .lazy(() => GeneratedTestProvenanceSchema)
+    .optional(),
 });
 export type Evidence = z.infer<typeof EvidenceSchema>;
 
@@ -284,9 +287,69 @@ export const ModelCallMetadataSchema = z.object({
   retryCount: z.number().nonnegative(),
   inputTokens: z.number().nonnegative().optional(),
   outputTokens: z.number().nonnegative().optional(),
+  cachedTokens: z.number().nonnegative().optional(),
   totalTokens: z.number().nonnegative().optional(),
 });
 export type ModelCallMetadata = z.infer<typeof ModelCallMetadataSchema>;
+
+export const AILimitStatus = z.enum([
+  "OK",
+  "REDUCED",
+  "DEGRADED",
+  "BLOCKED",
+  "UNKNOWN",
+]);
+export type AILimitStatus = z.infer<typeof AILimitStatus>;
+
+export const ThroughputLimitClassification = z.enum([
+  "CONTEXT_WINDOW_EXCEEDED",
+  "THROUGHPUT_REQUEST_TOO_LARGE",
+  "THROUGHPUT_TEMPORARILY_EXHAUSTED",
+  "RATE_LIMIT_UNKNOWN",
+]);
+export type ThroughputLimitClassification = z.infer<
+  typeof ThroughputLimitClassification
+>;
+
+export const ThroughputActionSchema = z.object({
+  action: z.enum([
+    "RIGHT_SIZED_OUTPUT",
+    "REDUCED_CONTEXT",
+    "DEFERRED",
+    "BLOCKED",
+  ]),
+  reason: z.string(),
+  originalDemand: z.number().optional(),
+  adjustedDemand: z.number().optional(),
+  waitMs: z.number().optional(),
+});
+export type ThroughputAction = z.infer<typeof ThroughputActionSchema>;
+
+export const AIContextBreakdownSchema = z.object({
+  category: z.string(),
+  estimatedTokens: z.number().nonnegative(),
+});
+export type AIContextBreakdown = z.infer<typeof AIContextBreakdownSchema>;
+
+export const AIUsageTelemetrySchema = z.object({
+  modelCalls: z.number().nonnegative(),
+  successfulModelCalls: z.number().nonnegative(),
+  failedModelCalls: z.number().nonnegative(),
+  inputTokens: z.number().nonnegative(),
+  outputTokens: z.number().nonnegative(),
+  cachedTokens: z.number().nonnegative(),
+  maxResponseTokens: z.number().nonnegative().optional(),
+  estimatedTpmDemand: z.number().nonnegative().optional(),
+  modelLimit: z.number().nonnegative().optional(),
+  throughputLimit: z.number().nonnegative().optional(),
+  throughputActions: z.array(ThroughputActionSchema).optional(),
+  limitClassification: ThroughputLimitClassification.optional(),
+  estimatedCost: z.number().nonnegative().optional(),
+  currency: z.string().optional(),
+  contextBreakdown: z.array(AIContextBreakdownSchema).optional(),
+  limitStatus: AILimitStatus,
+});
+export type AIUsageTelemetry = z.infer<typeof AIUsageTelemetrySchema>;
 
 export const BaselineComparisonClassification = z.enum([
   "INTRODUCED",
@@ -343,6 +406,16 @@ export const GeneratedTestFailureClassification = z.enum([
 ]);
 export type GeneratedTestFailureClassification = z.infer<
   typeof GeneratedTestFailureClassification
+>;
+
+export const GeneratedTestProvenanceSchema = z.object({
+  generatedTestId: z.string().min(1),
+  generatedFilePath: z.string().min(1),
+  failureClassification: GeneratedTestFailureClassification.optional(),
+  assertionsExecuted: z.boolean().optional(),
+});
+export type GeneratedTestProvenance = z.infer<
+  typeof GeneratedTestProvenanceSchema
 >;
 
 export const WriteOperation = z.enum(["CREATE", "MODIFY"]);
@@ -412,10 +485,17 @@ export const TestGenerationMetricsSchema = z.object({
   permanentTestsRetained: z.number().nonnegative(),
   candidateTestsRetained: z.number().nonnegative(),
   investigativeTestsRemoved: z.number().nonnegative(),
+  testDefectTestsRemoved: z.number().nonnegative(),
   modelCalls: z.number().nonnegative(),
   durationMs: z.number().nonnegative(),
 });
 export type TestGenerationMetrics = z.infer<typeof TestGenerationMetricsSchema>;
+
+export const AnalysisResultSchema = z.object({
+  repositoryProfile: RepositoryProfileSchema,
+  aiUsage: AIUsageTelemetrySchema,
+});
+export type AnalysisResult = z.infer<typeof AnalysisResultSchema>;
 
 export const QualityGapSchema = z.object({
   area: z.string(),
@@ -452,6 +532,7 @@ export const QEResultSchema = z.object({
   summary: z.string(),
   recommendedNextActions: z.array(z.string()),
   metrics: ExecutionMetricsSchema,
+  aiUsage: AIUsageTelemetrySchema.optional(),
 });
 export type QEResult = z.infer<typeof QEResultSchema>;
 
@@ -483,5 +564,6 @@ export const PartialQEResultSchema = z.object({
   summary: z.string().optional(),
   recommendedNextActions: z.array(z.string()).optional(),
   metrics: ExecutionMetricsSchema,
+  aiUsage: AIUsageTelemetrySchema.optional(),
 });
 export type PartialQEResult = z.infer<typeof PartialQEResultSchema>;

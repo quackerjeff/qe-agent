@@ -616,7 +616,7 @@ describe("ManagedProcess", () => {
   }, 10_000);
 
   it("detects readiness timeout from hanging server", async () => {
-    const port = 3500 + Math.floor(Math.random() * 100);
+    const port = 6500 + Math.floor(Math.random() * 100);
     managedProcess = new ManagedProcess({
       executable: "node",
       args: ["fixtures/browser-eval/server-hang.cjs"],

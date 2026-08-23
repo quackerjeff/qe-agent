@@ -7,6 +7,7 @@ import type {
 
 const MAX_CONTEXT_FILES = 5;
 const MAX_FILE_CHARS = 4000;
+const MAX_SOURCE_PATHS = 50;
 
 export interface TestContext {
   testFramework: string;
@@ -15,6 +16,7 @@ export interface TestContext {
   relatedTestFiles: TestFileSnippet[];
   fixtures: string[];
   helpers: string[];
+  relevantSourcePaths: string[];
 }
 
 export interface TestConventions {
@@ -48,6 +50,11 @@ export function buildTestContext(
   const conventions = inferConventions(profile, relatedTests);
   const fixtures = findFixtures(profile.root, testDirs);
   const helpers = findHelpers(profile.root, testDirs);
+  const relevantSourcePaths = discoverSourcePaths(
+    profile.root,
+    changedFiles ?? [],
+    testDirs,
+  );
 
   return {
     testFramework,
@@ -56,6 +63,7 @@ export function buildTestContext(
     relatedTestFiles: relatedTests,
     fixtures,
     helpers,
+    relevantSourcePaths,
   };
 }
 
@@ -255,4 +263,75 @@ function isTestFile(filename: string): boolean {
     lower.endsWith("tests.cs") ||
     lower.endsWith("test.py")
   );
+}
+
+const SOURCE_DIRS = ["src", "lib", "app", "packages", "modules"];
+const SOURCE_EXTENSIONS = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".py",
+  ".cs",
+]);
+
+function discoverSourcePaths(
+  root: string,
+  changedFiles: string[],
+  testDirs: string[],
+): string[] {
+  const paths: string[] = [];
+  const testDirSet = new Set(testDirs);
+
+  for (const cf of changedFiles) {
+    if (!isTestFile(basename(cf))) {
+      paths.push(cf);
+    }
+  }
+
+  for (const dir of SOURCE_DIRS) {
+    const fullDir = resolve(root, dir);
+    if (!existsSync(fullDir) || !statSync(fullDir).isDirectory()) continue;
+    collectSourceFiles(fullDir, root, paths, testDirSet, 0);
+    if (paths.length >= MAX_SOURCE_PATHS) break;
+  }
+
+  return [...new Set(paths)].slice(0, MAX_SOURCE_PATHS);
+}
+
+function collectSourceFiles(
+  dir: string,
+  root: string,
+  result: string[],
+  testDirs: Set<string>,
+  depth: number,
+): void {
+  if (depth > 3 || result.length >= MAX_SOURCE_PATHS) return;
+  try {
+    const entries = readdirSync(dir);
+    for (const entry of entries) {
+      if (entry.startsWith(".") || entry === "node_modules") continue;
+      const entryPath = resolve(dir, entry);
+      try {
+        const stat = statSync(entryPath);
+        if (stat.isDirectory()) {
+          const rel = relative(root, entryPath).split("/")[0];
+          if (!testDirs.has(rel)) {
+            collectSourceFiles(entryPath, root, result, testDirs, depth + 1);
+          }
+        } else if (stat.isFile()) {
+          const ext = extname(entry);
+          if (SOURCE_EXTENSIONS.has(ext) && !isTestFile(entry)) {
+            result.push(relative(root, entryPath));
+          }
+        }
+      } catch {
+        /* skip inaccessible */
+      }
+    }
+  } catch {
+    /* skip inaccessible */
+  }
 }

@@ -29,3 +29,8 @@ export {
   type GeneratedTestFailureContext,
   type GeneratedTestInvestigationResult,
 } from "./generated-test-investigator.js";
+export {
+  validateRelativeImports,
+  type ImportValidationResult,
+  type UnresolvedImport,
+} from "./import-validator.js";

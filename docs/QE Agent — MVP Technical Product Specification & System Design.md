@@ -120,6 +120,12 @@ The MVP MAY initially implement only one or two providers.
 
 The architecture SHALL allow additional providers without changing QE business logic.
 
+Model Gateway responses SHOULD expose provider-independent usage metadata when
+available, including input tokens, output tokens, cached tokens, response token
+reservation, model identifier, and cost-relevant data. Provider-specific usage
+formats and pricing details belong inside provider adapters and SHALL NOT leak
+into QE business logic.
+
 ---
 
 ## 3.3 Deterministic Execution, Probabilistic Reasoning
@@ -1635,6 +1641,11 @@ Initialize `.qe/`.
 
 Analyze repository structure and QE capabilities.
 
+When model usage occurs, `qe analyze` SHOULD report AI usage telemetry in both
+human-readable and JSON output. Telemetry SHOULD include model call count,
+input tokens, output tokens, cached tokens, maximum response token reservation,
+estimated cost where available, and token-limit status where known.
+
 ## `qe test`
 
 Execute repository quality validation without requiring a Git comparison.
@@ -1954,6 +1965,40 @@ verdict
 ```
 
 This information is important both for debugging and eventual commercial cost analysis.
+
+## 58.1 AI Usage and Token-Budget Telemetry
+
+QE runs that use the Model Gateway SHOULD track AI usage as first-class
+telemetry.
+
+Telemetry SHOULD include:
+
+```text
+model call count
+input/context tokens
+output/completion tokens
+cached tokens
+maximum response token reservation
+estimated TPM demand
+known model/account limit when available
+estimated cost when available
+major context contributors
+limit status
+```
+
+Before dispatching a model call, the agent SHOULD estimate the token demand of
+the assembled request. The estimate SHOULD include both input context and the
+configured maximum response token reservation.
+
+If estimated demand exceeds the effective model or account throughput limit,
+the agent SHOULD reduce, chunk, or summarize context before dispatching the
+call. If the request still cannot fit, the QE result SHOULD clearly explain the
+blocked or degraded condition rather than surfacing only a raw provider error.
+
+The implementation SHALL distinguish transient rate exhaustion from a single
+request that is intrinsically too large for the current TPM ceiling.
+
+See `docs/features/token-cost-telemetry.md`.
 
 ---
 
