@@ -3,7 +3,7 @@ import { extractJsonContent } from "../src/models/gateway/openai.js";
 
 /**
  * Real reasoning/local model output formats observed live against an
- * OpenAI-compatible endpoint (ollama serving a GLM reasoning model):
+ * OpenAI-compatible endpoint (e.g. ollama serving a reasoning model):
  * models wrap JSON in fences, emit <think> blocks, or embed JSON in
  * prose even when instructed to output bare JSON.
  */
