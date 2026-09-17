@@ -176,7 +176,6 @@ describe("McpPlaywrightAdapter", () => {
   it("reports available when the MCP server starts", async () => {
     const a = await makeServerAdapter();
     expect(await a.available()).toBe(true);
-    expect(a.getServerVersion()).toBe("1.0.0");
   });
 
   it("reports unavailable when the server cannot be spawned", async () => {

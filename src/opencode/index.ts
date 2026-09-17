@@ -5,7 +5,6 @@ export {
   type OpenCodeMessageUrgency,
   type MessageSendRequest,
   type MessageSendResponse,
-  type SessionCreateResponse,
   type OpenCodePublishingResult,
 } from "./types.js";
 
@@ -13,7 +12,6 @@ export {
   type OpenCodeClient,
   FakeOpenCodeClient,
   OpenCodeApiError,
-  type RecordedSessionCreate,
   type RecordedMessage,
   type RecordedToast,
 } from "./client.js";
@@ -39,7 +37,6 @@ export {
   OpenCodeReporter,
   type OpenCodeReporterConfig,
   validateResultForPublishing,
-  persistResult,
   persistSessionMessage,
 } from "./reporter.js";
 

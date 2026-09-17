@@ -8,18 +8,19 @@ import type {
   BrowserExecutionContext,
   BrowserFailureClassification,
 } from "./types.js";
-import { validateBrowserAction } from "./action-validator.js";
+import { executeScenarioActions } from "./scenario-executor.js";
 import { evaluateUrlPolicy } from "./url-policy.js";
+import { redactSecrets } from "../../execution/secret-redactor.js";
 
 /**
  * BrowserCapability implementation backed by a Playwright MCP server
  * (e.g. `npx @playwright/mcp`) spoken to over stdio JSON-RPC.
  *
  * Used as a fallback when a local Chromium binary is unavailable
- * (ADR-008). The MCP server owns the actual browser; this adapter only
+ * (ADR-012). The MCP server owns the actual browser; this adapter only
  * translates the QE Agent's deterministic action vocabulary into MCP
- * tool calls and applies the same URL policy, action validation, and
- * secret redaction as the local Playwright adapter.
+ * tool calls. Budget and URL-policy enforcement live in the shared
+ * scenario executor; secret redaction uses the canonical redactor.
  */
 
 export interface McpPlaywrightOptions {
@@ -62,7 +63,6 @@ export class McpPlaywrightAdapter implements BrowserCapability {
     }
   >();
   private buffer = "";
-  private serverVersion: string | null = null;
   private readonly options: McpPlaywrightOptions;
 
   constructor(options: McpPlaywrightOptions) {
@@ -83,73 +83,10 @@ export class McpPlaywrightAdapter implements BrowserCapability {
     scenario: BrowserScenario,
     context: BrowserExecutionContext,
   ): Promise<BrowserScenarioResult> {
-    const startTime = Date.now();
-    const actionResults: BrowserActionResult[] = [];
-    let scenarioStatus: BrowserScenarioResult["status"] = "PASS";
-    let actionsExecuted = 0;
-    const budgetDeadline = startTime + context.budget.maxBrowserDurationMs;
-
-    try {
-      await this.ensureServer();
-
-      for (const action of scenario.actions) {
-        if (actionsExecuted >= context.budget.maxBrowserActions) {
-          actionResults.push(
-            this.skippedResult(action, "Action budget exceeded"),
-          );
-          continue;
-        }
-
-        if (Date.now() >= budgetDeadline) {
-          actionResults.push(
-            this.skippedResult(action, "Duration budget exceeded"),
-          );
-          continue;
-        }
-
-        const validation = validateBrowserAction(
-          action,
-          context.allowedOrigins,
-        );
-        if (!validation.valid) {
-          actionResults.push({
-            action,
-            status: "POLICY_DENIED",
-            durationMs: 0,
-            error: validation.reason,
-          });
-          scenarioStatus = "FAIL";
-          continue;
-        }
-
-        const result = await this.executeAction(action, context);
-        actionResults.push(result);
-        actionsExecuted++;
-
-        if (result.status === "FAIL" || result.status === "POLICY_DENIED") {
-          scenarioStatus = "FAIL";
-        }
-      }
-    } catch (err) {
-      scenarioStatus = "BLOCKED";
-      actionResults.push({
-        action: scenario.actions[0] ?? {
-          type: "NAVIGATE",
-          url: scenario.baseUrl,
-        },
-        status: "FAIL",
-        durationMs: Date.now() - startTime,
-        error: err instanceof Error ? err.message : String(err),
-        failureClassification: "ENVIRONMENT_ISSUE",
-      });
-    }
-
-    return {
-      scenarioId: scenario.id,
-      status: scenarioStatus,
-      actionResults,
-      durationMs: Date.now() - startTime,
-    };
+    await this.ensureServer();
+    return executeScenarioActions(scenario, context, (action) =>
+      this.executeAction(action, context),
+    );
   }
 
   async executeAction(
@@ -157,54 +94,23 @@ export class McpPlaywrightAdapter implements BrowserCapability {
     context: BrowserExecutionContext,
   ): Promise<BrowserActionResult> {
     const startTime = Date.now();
+    const elapsed = () => Date.now() - startTime;
 
     try {
       await this.ensureServer();
 
       switch (action.type) {
-        case "NAVIGATE": {
-          const url = action.url!;
-          const policy = evaluateUrlPolicy(url, context.allowedOrigins);
-          if (!policy.allowed) {
-            return {
-              action,
-              status: "POLICY_DENIED",
-              durationMs: Date.now() - startTime,
-              error: `Navigation to denied origin: ${url} — ${policy.reason}`,
-            };
-          }
-          await this.callTool("browser_navigate", { url });
-          const currentUrl = await this.currentUrl();
-          const postPolicy = evaluateUrlPolicy(
-            currentUrl,
-            context.allowedOrigins,
-          );
-          if (!postPolicy.allowed) {
-            return {
-              action,
-              status: "POLICY_DENIED",
-              durationMs: Date.now() - startTime,
-              url: currentUrl,
-              error: `Navigation reached denied origin: ${currentUrl}`,
-            };
-          }
-          return {
-            action,
-            status: "PASS",
-            durationMs: Date.now() - startTime,
-            url: currentUrl,
-          };
-        }
+        case "NAVIGATE":
+          return await this.navigate(action, context, startTime);
 
-        case "CLICK": {
+        case "CLICK":
           await this.callTool("browser_click", {
             element: action.description ?? "click target",
             ref: this.selectorToRef(action.selector!),
           });
           return await this.postActionResult(action, context, startTime);
-        }
 
-        case "FILL": {
+        case "FILL":
           await this.callTool("browser_fill", {
             element: action.description ?? "fill target",
             ref: this.selectorToRef(action.selector!),
@@ -213,25 +119,19 @@ export class McpPlaywrightAdapter implements BrowserCapability {
           return {
             action: this.redactActionSecrets(action, context.secrets),
             status: "PASS",
-            durationMs: Date.now() - startTime,
+            durationMs: elapsed(),
           };
-        }
 
-        case "SELECT": {
+        case "SELECT":
           await this.callTool("browser_select_option", {
             element: action.description ?? "select target",
             ref: this.selectorToRef(action.selector!),
             values: [action.value ?? ""],
           });
-          return {
-            action,
-            status: "PASS",
-            durationMs: Date.now() - startTime,
-          };
-        }
+          return { action, status: "PASS", durationMs: elapsed() };
 
         case "CHECK":
-        case "UNCHECK": {
+        case "UNCHECK":
           await this.callTool(
             action.type === "CHECK" ? "browser_check" : "browser_uncheck",
             {
@@ -239,57 +139,22 @@ export class McpPlaywrightAdapter implements BrowserCapability {
               ref: this.selectorToRef(action.selector!),
             },
           );
-          return {
-            action,
-            status: "PASS",
-            durationMs: Date.now() - startTime,
-          };
-        }
+          return { action, status: "PASS", durationMs: elapsed() };
 
-        case "PRESS": {
+        case "PRESS":
           await this.callTool("browser_press_key", { key: action.key! });
           return await this.postActionResult(action, context, startTime);
-        }
 
-        case "ASSERT_TEXT": {
-          const text = await this.callTool("browser_snapshot", {});
-          const expected = action.value ?? "";
-          const pass =
-            typeof text === "string" &&
-            text.toLowerCase().includes(expected.toLowerCase());
-          return {
-            action,
-            status: pass ? "PASS" : "FAIL",
-            durationMs: Date.now() - startTime,
-            expected: this.redactSecrets(expected, context.secrets),
-            actual: pass
-              ? this.redactSecrets(expected, context.secrets)
-              : this.redactSecrets(
-                  typeof text === "string"
-                    ? `(text not found in snapshot)`
-                    : "(no snapshot text)",
-                  context.secrets,
-                ),
-          };
-        }
+        case "ASSERT_TEXT":
+          return await this.assertSnapshotText(action, context, startTime);
 
         case "ASSERT_VISIBLE":
-        case "ASSERT_HIDDEN": {
-          const snapshot = await this.callTool("browser_snapshot", {});
-          const snapshotText = typeof snapshot === "string" ? snapshot : "";
-          // Best-effort visibility check from the accessibility snapshot.
-          const selectorText = action.selector?.value ?? "";
-          const found =
-            selectorText.length > 0 && snapshotText.includes(selectorText);
-          const visible = action.type === "ASSERT_VISIBLE" ? found : !found;
-          return {
+        case "ASSERT_HIDDEN":
+          return await this.assertSnapshotVisibility(
             action,
-            status: visible ? "PASS" : "FAIL",
-            durationMs: Date.now() - startTime,
-            expected: action.type === "ASSERT_VISIBLE" ? "visible" : "hidden",
-            actual: found ? "visible" : "not visible",
-          };
-        }
+            context,
+            startTime,
+          );
 
         case "ASSERT_URL": {
           const currentUrl = await this.currentUrl();
@@ -298,60 +163,29 @@ export class McpPlaywrightAdapter implements BrowserCapability {
           return {
             action,
             status: pass ? "PASS" : "FAIL",
-            durationMs: Date.now() - startTime,
+            durationMs: elapsed(),
             url: currentUrl,
-            expected: this.redactSecrets(expected, context.secrets),
-            actual: this.redactSecrets(currentUrl, context.secrets),
+            expected: redactSecrets(expected, context.secrets),
+            actual: redactSecrets(currentUrl, context.secrets),
           };
         }
 
-        case "ASSERT_VALUE": {
-          const snapshot = await this.callTool("browser_snapshot", {});
-          const snapshotText = typeof snapshot === "string" ? snapshot : "";
-          const expected = action.value ?? "";
-          const isSecret = this.isSecretValue(expected, context.secrets);
-          if (isSecret) {
-            const pass = snapshotText.includes("[secret]");
-            return {
-              action: this.redactActionSecrets(action, context.secrets),
-              status: pass ? "PASS" : "FAIL",
-              durationMs: Date.now() - startTime,
-              expected: "[REDACTED]",
-              actual: pass
-                ? "value matched expected secret"
-                : "value did not match expected secret",
-            };
-          }
-          const pass = snapshotText.includes(expected);
-          return {
-            action,
-            status: pass ? "PASS" : "FAIL",
-            durationMs: Date.now() - startTime,
-            expected: this.redactSecrets(expected, context.secrets),
-            actual: pass
-              ? this.redactSecrets(expected, context.secrets)
-              : "(value not found in snapshot)",
-          };
-        }
+        case "ASSERT_VALUE":
+          return await this.assertSnapshotValue(action, context, startTime);
 
-        case "SCREENSHOT": {
+        case "SCREENSHOT":
           // MCP-managed browser captures screenshots server-side;
           // no local artifact is written by QE.
           await this.callTool("browser_take_screenshot", {
             filename: `${action.description ?? "screenshot"}.png`,
           });
-          return {
-            action,
-            status: "PASS",
-            durationMs: Date.now() - startTime,
-          };
-        }
+          return { action, status: "PASS", durationMs: elapsed() };
 
         default:
           return {
             action,
             status: "FAIL",
-            durationMs: Date.now() - startTime,
+            durationMs: elapsed(),
             error: `Unknown action type: ${action.type}`,
           };
       }
@@ -360,8 +194,8 @@ export class McpPlaywrightAdapter implements BrowserCapability {
       return {
         action: this.redactActionSecrets(action, context.secrets),
         status: "FAIL",
-        durationMs: Date.now() - startTime,
-        error: this.redactSecrets(errorMsg, context.secrets),
+        durationMs: elapsed(),
+        error: redactSecrets(errorMsg, context.secrets),
         failureClassification: this.classifyError(errorMsg),
       };
     }
@@ -374,29 +208,195 @@ export class McpPlaywrightAdapter implements BrowserCapability {
     }
     this.pending.clear();
 
-    if (this.process) {
-      const proc = this.process;
-      this.process = null;
-      this.serverVersion = null;
-      try {
-        proc.stdin?.end();
-      } catch {
-        // best-effort
-      }
-      const exited = new Promise<void>((resolve) => {
-        proc.once("exit", () => resolve());
-      });
-      proc.kill("SIGTERM");
-      await Promise.race([
-        exited,
-        new Promise<void>((resolve) => setTimeout(() => resolve(), 2_000)),
-      ]);
-      if (!proc.killed) proc.kill("SIGKILL");
+    if (!this.process) return;
+    const proc = this.process;
+    this.process = null;
+
+    try {
+      proc.stdin?.end();
+    } catch {
+      // best-effort
+    }
+    const exited = new Promise<void>((resolve) => {
+      proc.once("exit", () => resolve());
+    });
+    proc.kill("SIGTERM");
+    await Promise.race([
+      exited,
+      new Promise<void>((resolve) => setTimeout(() => resolve(), 2_000)),
+    ]);
+    if (!proc.killed) proc.kill("SIGKILL");
+  }
+
+  // --- Action helpers ---
+
+  private async navigate(
+    action: BrowserAction,
+    context: BrowserExecutionContext,
+    startTime: number,
+  ): Promise<BrowserActionResult> {
+    const url = action.url!;
+    const policy = evaluateUrlPolicy(url, context.allowedOrigins);
+    if (!policy.allowed) {
+      return {
+        action,
+        status: "POLICY_DENIED",
+        durationMs: Date.now() - startTime,
+        error: `Navigation to denied origin: ${url} — ${policy.reason}`,
+      };
+    }
+    await this.callTool("browser_navigate", { url });
+    return this.postActionResult(action, context, startTime);
+  }
+
+  private async postActionResult(
+    action: BrowserAction,
+    context: BrowserExecutionContext,
+    startTime: number,
+  ): Promise<BrowserActionResult> {
+    const currentUrl = await this.currentUrl();
+    const policy = evaluateUrlPolicy(currentUrl, context.allowedOrigins);
+    if (!policy.allowed) {
+      return {
+        action,
+        status: "POLICY_DENIED",
+        durationMs: Date.now() - startTime,
+        url: currentUrl,
+        error: `Navigation reached denied origin: ${currentUrl}`,
+      };
+    }
+    return {
+      action,
+      status: "PASS",
+      durationMs: Date.now() - startTime,
+      url: currentUrl,
+    };
+  }
+
+  private async assertSnapshotText(
+    action: BrowserAction,
+    context: BrowserExecutionContext,
+    startTime: number,
+  ): Promise<BrowserActionResult> {
+    const snapshot = await this.callTool("browser_snapshot", {});
+    const expected = action.value ?? "";
+    const pass =
+      typeof snapshot === "string" &&
+      snapshot.toLowerCase().includes(expected.toLowerCase());
+    return {
+      action,
+      status: pass ? "PASS" : "FAIL",
+      durationMs: Date.now() - startTime,
+      expected: redactSecrets(expected, context.secrets),
+      actual: pass
+        ? redactSecrets(expected, context.secrets)
+        : "(text not found in snapshot)",
+    };
+  }
+
+  private async assertSnapshotVisibility(
+    action: BrowserAction,
+    _context: BrowserExecutionContext,
+    startTime: number,
+  ): Promise<BrowserActionResult> {
+    const snapshot = await this.callTool("browser_snapshot", {});
+    const snapshotText = typeof snapshot === "string" ? snapshot : "";
+    // Best-effort visibility check from the accessibility snapshot.
+    const selectorText = action.selector?.value ?? "";
+    const found =
+      selectorText.length > 0 && snapshotText.includes(selectorText);
+    const visible = action.type === "ASSERT_VISIBLE" ? found : !found;
+    return {
+      action,
+      status: visible ? "PASS" : "FAIL",
+      durationMs: Date.now() - startTime,
+      expected: action.type === "ASSERT_VISIBLE" ? "visible" : "hidden",
+      actual: found ? "visible" : "not visible",
+    };
+  }
+
+  private async assertSnapshotValue(
+    action: BrowserAction,
+    context: BrowserExecutionContext,
+    startTime: number,
+  ): Promise<BrowserActionResult> {
+    const snapshot = await this.callTool("browser_snapshot", {});
+    const snapshotText = typeof snapshot === "string" ? snapshot : "";
+    const expected = action.value ?? "";
+    const isSecret = this.isSecretValue(expected, context.secrets);
+    if (isSecret) {
+      const pass = snapshotText.includes("[secret]");
+      return {
+        action: this.redactActionSecrets(action, context.secrets),
+        status: pass ? "PASS" : "FAIL",
+        durationMs: Date.now() - startTime,
+        expected: "[REDACTED]",
+        actual: pass
+          ? "value matched expected secret"
+          : "value did not match expected secret",
+      };
+    }
+    const pass = snapshotText.includes(expected);
+    return {
+      action,
+      status: pass ? "PASS" : "FAIL",
+      durationMs: Date.now() - startTime,
+      expected: redactSecrets(expected, context.secrets),
+      actual: pass
+        ? redactSecrets(expected, context.secrets)
+        : "(value not found in snapshot)",
+    };
+  }
+
+  private selectorToRef(
+    selector: NonNullable<BrowserAction["selector"]>,
+  ): string {
+    // The Playwright MCP tools take human-readable element descriptions or
+    // refs from a prior snapshot. QE's structured selectors are mapped to
+    // the most specific readable form available.
+    switch (selector.type) {
+      case "role":
+        return selector.options?.name
+          ? `${selector.value} named "${selector.options.name}"`
+          : selector.value;
+      case "testId":
+        return `data-testid=${selector.value}`;
+      default:
+        return selector.value;
     }
   }
 
-  getServerVersion(): string | null {
-    return this.serverVersion;
+  private isSecretValue(value: string, secrets: string[]): boolean {
+    return secrets.some((s) => s.length > 0 && value.includes(s));
+  }
+
+  private redactActionSecrets(
+    action: BrowserAction,
+    secrets: string[],
+  ): BrowserAction {
+    if (!action.value || !this.isSecretValue(action.value, secrets)) {
+      return action;
+    }
+    return { ...action, value: "[REDACTED]" };
+  }
+
+  private classifyError(errorMsg: string): BrowserFailureClassification {
+    const msg = errorMsg.toLowerCase();
+    if (msg.includes("timeout") || msg.includes("timed out")) {
+      return "TIMEOUT";
+    }
+    if (
+      msg.includes("mcp server exited") ||
+      msg.includes("not running") ||
+      msg.includes("spawn") ||
+      msg.includes("enoent")
+    ) {
+      return "ENVIRONMENT_ISSUE";
+    }
+    if (msg.includes("element") || msg.includes("not found")) {
+      return "SELECTOR_FAILURE";
+    }
+    return "UNKNOWN";
   }
 
   // --- JSON-RPC plumbing ---
@@ -427,7 +427,7 @@ export class McpPlaywrightAdapter implements BrowserCapability {
 
     // MCP initialize handshake
     const startupTimeoutMs = this.options.startupTimeoutMs ?? 15_000;
-    const initResult = (await this.request(
+    await this.request(
       "initialize",
       {
         protocolVersion: "2025-06-18",
@@ -435,9 +435,7 @@ export class McpPlaywrightAdapter implements BrowserCapability {
         clientInfo: { name: "qe-agent", version: "0.1.0" },
       },
       startupTimeoutMs,
-    )) as { serverInfo?: { version?: string } } | undefined;
-
-    this.serverVersion = initResult?.serverInfo?.version ?? null;
+    );
 
     await this.notify("notifications/initialized");
   }
@@ -522,11 +520,10 @@ export class McpPlaywrightAdapter implements BrowserCapability {
       arguments: args,
     })) as { content?: { type: string; text?: string }[] } | undefined;
 
-    const text = (result?.content ?? [])
+    return (result?.content ?? [])
       .filter((c) => c.type === "text" && typeof c.text === "string")
       .map((c) => c.text)
       .join("\n");
-    return text;
   }
 
   private async currentUrl(): Promise<string> {
@@ -540,105 +537,5 @@ export class McpPlaywrightAdapter implements BrowserCapability {
       // not JSON — fall through
     }
     return text.trim();
-  }
-
-  // --- helpers ---
-
-  private selectorToRef(
-    selector: NonNullable<BrowserAction["selector"]>,
-  ): string {
-    // The Playwright MCP tools take human-readable element descriptions or
-    // refs from a prior snapshot. QE's structured selectors are mapped to
-    // the most specific readable form available.
-    switch (selector.type) {
-      case "role":
-        return selector.options?.name
-          ? `${selector.value} named "${selector.options.name}"`
-          : selector.value;
-      case "testId":
-        return `data-testid=${selector.value}`;
-      default:
-        return selector.value;
-    }
-  }
-
-  private async postActionResult(
-    action: BrowserAction,
-    context: BrowserExecutionContext,
-    startTime: number,
-  ): Promise<BrowserActionResult> {
-    const currentUrl = await this.currentUrl();
-    const policy = evaluateUrlPolicy(currentUrl, context.allowedOrigins);
-    if (!policy.allowed) {
-      return {
-        action,
-        status: "POLICY_DENIED",
-        durationMs: Date.now() - startTime,
-        url: currentUrl,
-        error: `Navigation reached denied origin: ${currentUrl}`,
-      };
-    }
-    return {
-      action,
-      status: "PASS",
-      durationMs: Date.now() - startTime,
-      url: currentUrl,
-    };
-  }
-
-  private isSecretValue(value: string, secrets: string[]): boolean {
-    return secrets.some((s) => s.length > 0 && value.includes(s));
-  }
-
-  private redactActionSecrets(
-    action: BrowserAction,
-    secrets: string[],
-  ): BrowserAction {
-    if (!action.value) return action;
-    if (this.isSecretValue(action.value, secrets)) {
-      return { ...action, value: "[REDACTED]" };
-    }
-    return action;
-  }
-
-  private redactSecrets(text: string, secrets: string[]): string {
-    let result = text;
-    for (const secret of secrets) {
-      if (secret.length > 0) {
-        result = result.replaceAll(secret, "[REDACTED]");
-      }
-    }
-    return result;
-  }
-
-  private classifyError(errorMsg: string): BrowserFailureClassification {
-    const msg = errorMsg.toLowerCase();
-    if (msg.includes("timeout") || msg.includes("timed out")) {
-      return "TIMEOUT";
-    }
-    if (
-      msg.includes("mcp server exited") ||
-      msg.includes("not running") ||
-      msg.includes("spawn") ||
-      msg.includes("enoent")
-    ) {
-      return "ENVIRONMENT_ISSUE";
-    }
-    if (msg.includes("element") || msg.includes("not found")) {
-      return "SELECTOR_FAILURE";
-    }
-    return "UNKNOWN";
-  }
-
-  private skippedResult(
-    action: BrowserAction,
-    reason: string,
-  ): BrowserActionResult {
-    return {
-      action,
-      status: "SKIPPED",
-      durationMs: 0,
-      error: reason,
-    };
   }
 }

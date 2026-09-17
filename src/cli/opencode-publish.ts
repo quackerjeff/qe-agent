@@ -100,6 +100,7 @@ export async function runOpenCodePublish(
   const knownSecrets = password ? [password] : [];
 
   const reporterConfig: OpenCodeReporterConfig = {
+    messageEnabled: config.opencode.messageEnabled,
     toastEnabled: config.opencode.toastEnabled,
     dryRun,
     maxRetries: 2,

@@ -1,8 +1,4 @@
-import type {
-  MessageSendRequest,
-  MessageSendResponse,
-  SessionCreateResponse,
-} from "./types.js";
+import type { MessageSendRequest, MessageSendResponse } from "./types.js";
 import type { OpenCodeClient } from "./client.js";
 import { OpenCodeApiError } from "./client.js";
 
@@ -87,8 +83,6 @@ async function nodeFetch(
 /**
  * HTTP client for the OpenCode server API (https://opencode.ai/docs/server).
  * Endpoints used:
- *   POST /session                      — create session
- *   POST /session/:id/message          — send message and wait for response
  *   POST /session/:id/prompt_async     — send message without waiting
  *   POST /tui/show-toast               — desktop-style notification (TUI)
  */
@@ -162,16 +156,6 @@ export class HttpOpenCodeClient implements OpenCodeClient {
         false,
       );
     }
-  }
-
-  async createSession(title?: string): Promise<SessionCreateResponse> {
-    const body = title ? JSON.stringify({ title }) : JSON.stringify({});
-    const data = (await this.request(
-      `${this.baseUrl}/session`,
-      "POST",
-      body,
-    )) as { id: string; title?: string };
-    return { sessionId: data.id, title: data.title ?? title ?? "Untitled" };
   }
 
   async sendMessage(request: MessageSendRequest): Promise<MessageSendResponse> {

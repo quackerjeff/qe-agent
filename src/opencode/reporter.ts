@@ -2,6 +2,7 @@ import { resolve, join } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import type { QEResult } from "../types/index.js";
 import { QEResultSchema } from "../types/index.js";
+import { redactorFor } from "../core/reporting/index.js";
 import type { OpenCodeClient } from "./client.js";
 import { OpenCodeApiError } from "./client.js";
 import type { OpenCodeContext, OpenCodePublishingResult } from "./types.js";
@@ -9,6 +10,7 @@ import { mapVerdictToUrgency } from "./verdict.js";
 import { renderSessionMessage } from "./summary.js";
 
 export interface OpenCodeReporterConfig {
+  messageEnabled: boolean;
   toastEnabled: boolean;
   dryRun: boolean;
   maxRetries: number;
@@ -25,7 +27,7 @@ export class OpenCodeReporter {
     context: OpenCodeContext,
     knownSecrets: string[] = [],
   ): Promise<OpenCodePublishingResult> {
-    const redact = buildRedactor(knownSecrets);
+    const redact = redactorFor(knownSecrets);
     const message = renderSessionMessage(result, redact);
 
     const publishingResult: OpenCodePublishingResult = {
@@ -35,10 +37,26 @@ export class OpenCodeReporter {
       dryRun: this.config.dryRun,
     };
 
+    if (this.config.messageEnabled) {
+      await this.deliverMessage(message, context, publishingResult);
+    }
+
+    if (this.config.toastEnabled && !this.config.dryRun) {
+      await this.sendToast(result, publishingResult);
+    }
+
+    return publishingResult;
+  }
+
+  private async deliverMessage(
+    message: string,
+    context: OpenCodeContext,
+    out: OpenCodePublishingResult,
+  ): Promise<void> {
     if (this.config.dryRun) {
-      publishingResult.messageDelivered = true;
-      publishingResult.messageId = "(dry-run)";
-      return publishingResult;
+      out.messageDelivered = true;
+      out.messageId = "(dry-run)";
+      return;
     }
 
     let lastError: Error | undefined;
@@ -48,10 +66,9 @@ export class OpenCodeReporter {
           sessionId: context.sessionId,
           text: message,
         });
-        publishingResult.messageDelivered = true;
-        publishingResult.messageId = response.messageId;
-        lastError = undefined;
-        break;
+        out.messageDelivered = true;
+        out.messageId = response.messageId;
+        return;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
         if (err instanceof OpenCodeApiError && err.isServerError) {
@@ -61,60 +78,32 @@ export class OpenCodeReporter {
       }
     }
 
-    if (lastError) {
-      publishingResult.warnings.push(
-        redact(`Message delivery failed: ${lastError.message}`),
+    out.warnings.push(
+      `Message delivery failed: ${lastError?.message ?? "unknown"}`,
+    );
+  }
+
+  private async sendToast(
+    result: QEResult,
+    out: OpenCodePublishingResult,
+  ): Promise<void> {
+    const urgency = mapVerdictToUrgency(result.verdict);
+    const toastMessage = `QE Agent: ${result.verdict} (${result.confidence} confidence)`;
+    try {
+      await this.client.showToast(
+        toastMessage,
+        urgency === "error" ? "error" : "success",
+      );
+    } catch (err) {
+      out.warnings.push(
+        `Toast notification failed: ${err instanceof Error ? err.message : "unknown"}`,
       );
     }
-
-    if (this.config.toastEnabled && !this.config.dryRun) {
-      const urgency = mapVerdictToUrgency(result.verdict);
-      const toastMessage = `QE Agent: ${result.verdict} (${result.confidence} confidence)`;
-      try {
-        await this.client.showToast(
-          toastMessage,
-          urgency === "error" ? "error" : "success",
-        );
-      } catch (err) {
-        publishingResult.warnings.push(
-          `Toast notification failed: ${err instanceof Error ? err.message : "unknown"}`,
-        );
-      }
-    }
-
-    return publishingResult;
   }
-}
-
-function buildRedactor(knownSecrets: string[]): (text: string) => string {
-  const meaningful = knownSecrets.filter((s) => s.length >= 4);
-  if (meaningful.length === 0) return (t) => t;
-
-  return (text: string) => {
-    let result = text;
-    for (const secret of meaningful) {
-      while (result.includes(secret)) {
-        result = result.replace(secret, "***");
-      }
-    }
-    return result;
-  };
 }
 
 export function validateResultForPublishing(json: unknown): QEResult {
   return QEResultSchema.parse(json);
-}
-
-export async function persistResult(
-  result: QEResult,
-  repoPath: string,
-): Promise<string> {
-  const absRepo = resolve(repoPath);
-  const runDir = join(absRepo, ".qe", "runs", result.executionId);
-  await mkdir(runDir, { recursive: true });
-  const resultPath = join(runDir, "result.json");
-  await writeFile(resultPath, JSON.stringify(result, null, 2), "utf-8");
-  return resultPath;
 }
 
 export async function persistSessionMessage(
@@ -122,7 +111,7 @@ export async function persistSessionMessage(
   repoPath: string,
   knownSecrets: string[] = [],
 ): Promise<string> {
-  const redact = buildRedactor(knownSecrets);
+  const redact = redactorFor(knownSecrets);
   const message = renderSessionMessage(result, redact);
   const absRepo = resolve(repoPath);
   const runDir = join(absRepo, ".qe", "runs", result.executionId);

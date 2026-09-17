@@ -35,11 +35,7 @@ export class CompositeBrowserCapability implements BrowserCapability {
     const result = await this.primary.executeScenario(scenario, context);
 
     if (this.isEnvironmentFailure(result)) {
-      const fallbackResult = await this.fallback.executeScenario(
-        scenario,
-        context,
-      );
-      return this.annotate(fallbackResult, result);
+      return this.fallback.executeScenario(scenario, context);
     }
 
     return result;
@@ -83,26 +79,5 @@ export class CompositeBrowserCapability implements BrowserCapability {
         (r) => r.failureClassification === "ENVIRONMENT_ISSUE",
       )
     );
-  }
-
-  private annotate(
-    fallbackResult: BrowserScenarioResult,
-    primaryResult: BrowserScenarioResult,
-  ): BrowserScenarioResult {
-    const primaryError = primaryResult.actionResults.find(
-      (r) => r.failureClassification === "ENVIRONMENT_ISSUE",
-    )?.error;
-
-    return {
-      ...fallbackResult,
-      actionResults: fallbackResult.actionResults.map((r) =>
-        r.status === "FAIL" && r.failureClassification === "ENVIRONMENT_ISSUE"
-          ? {
-              ...r,
-              error: `${r.error ?? "environment failure"}${primaryError ? ` (local browser unavailable: ${primaryError})` : ""}`,
-            }
-          : r,
-      ),
-    };
   }
 }

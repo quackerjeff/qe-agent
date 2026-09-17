@@ -5,6 +5,7 @@ export {
   type McpPlaywrightOptions,
 } from "./mcp-playwright-adapter.js";
 export { CompositeBrowserCapability } from "./composite.js";
+export { executeScenarioActions } from "./scenario-executor.js";
 export {
   ManagedProcess,
   type ManagedProcessOptions,

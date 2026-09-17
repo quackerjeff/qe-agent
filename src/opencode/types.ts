@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Verdict } from "../types/domain.js";
 
 /**
  * OpenCode harness integration types.
@@ -30,7 +31,7 @@ export type OpenCodeContext = z.infer<typeof OpenCodeContextSchema>;
  */
 export type OpenCodeMessageUrgency = "normal" | "warning" | "error";
 
-export const VERDICT_TO_URGENCY: Record<string, OpenCodeMessageUrgency> = {
+export const VERDICT_TO_URGENCY: Record<Verdict, OpenCodeMessageUrgency> = {
   PASS: "normal",
   PASS_WITH_CONCERNS: "warning",
   NEEDS_REVIEW: "warning",
@@ -46,11 +47,6 @@ export interface MessageSendRequest {
 export interface MessageSendResponse {
   messageId: string;
   delivered: boolean;
-}
-
-export interface SessionCreateResponse {
-  sessionId: string;
-  title: string;
 }
 
 export interface OpenCodePublishingResult {

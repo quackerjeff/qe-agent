@@ -15,15 +15,14 @@ import {
   renderSessionMessage,
   OpenCodeReporter,
   validateResultForPublishing,
-  persistResult,
   persistSessionMessage,
   type OpenCodeContext,
   type OpenCodeReporterConfig,
   type HttpRequestFn,
 } from "../src/opencode/index.js";
 import { QEConfigSchema } from "../src/config/schema.js";
-import type { QEResult, Finding } from "../src/types/index.js";
 import type { Verdict } from "../src/types/domain.js";
+import { makeResult, makeFinding } from "./helpers/qe-result-fixture.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -40,90 +39,17 @@ function makeContext(
   };
 }
 
-function makeFinding(overrides: Partial<Finding> = {}): Finding {
-  return {
-    id: "finding-1",
-    category: "DEFECT",
-    severity: "HIGH",
-    confidence: 0.9,
-    title: "Null pointer in handler",
-    description: "The handler does not check for null input",
-    evidenceIds: ["ev-1"],
-    affectedFiles: ["src/handler.ts"],
-    ...overrides,
-  };
-}
-
-function makeResult(overrides: Partial<QEResult> = {}): QEResult {
-  return {
-    executionId: "exec-oc-001",
-    repository: { path: "/repo", name: "test-repo" },
-    target: "abc123",
-    profile: "standard",
-    repositoryProfile: {
-      root: "/repo",
-      git: { detected: true },
-      languages: [],
-      frameworks: [],
-      packageManagers: [],
-      buildSystems: [],
-      testFrameworks: [],
-      ciSystems: [],
-      applications: [],
-      documentation: [],
-      commands: [],
-      capabilities: [],
-      confidence: 0.9,
-    },
-    riskAssessment: {
-      level: "MEDIUM",
-      factors: [],
-      confidence: 0.8,
-      summary: "Medium risk change",
-    },
-    validationPlan: {
-      objectives: [{ id: "obj-1", description: "Validate change" }],
-      plannedActions: [],
-      identifiedRisks: [],
-      expectedCapabilities: [],
-    },
-    evidence: [
-      {
-        id: "ev-1",
-        type: "TEST_RESULT",
-        provenance: "executed",
-        timestamp: new Date().toISOString(),
-        source: "vitest",
-        status: "PASS",
-        summary: "All tests passed",
-      },
-    ],
-    findings: [],
-    requirements: [],
-    remainingGaps: [],
-    verdict: "PASS",
-    confidence: "HIGH",
-    summary: "All validations passed",
-    recommendedNextActions: [],
-    metrics: {
-      startTime: new Date().toISOString(),
-      endTime: new Date().toISOString(),
-      durationMs: 5000,
-      modelCalls: 4,
-      commandsExecuted: 3,
-      testsExecuted: 10,
-      testsGenerated: 0,
-      retries: 0,
-      stateTransitions: 8,
-    },
-    ...overrides,
-  };
+function makeOpenCodeResult(
+  overrides: Parameters<typeof makeResult>[0] = {},
+): ReturnType<typeof makeResult> {
+  return makeResult(overrides, { executionId: "exec-oc-001" });
 }
 
 function makeDefaultReporterConfig(
   overrides: Partial<OpenCodeReporterConfig> = {},
 ): OpenCodeReporterConfig {
   return {
+    messageEnabled: true,
     toastEnabled: true,
     dryRun: false,
     maxRetries: 2,
@@ -262,7 +188,7 @@ describe("renderSessionMessage", () => {
   const redact = (t: string) => t;
 
   it("renders verdict and core fields", () => {
-    const msg = renderSessionMessage(makeResult(), redact);
+    const msg = renderSessionMessage(makeOpenCodeResult(), redact);
     expect(msg).toContain("# QE Agent Verdict — PASS");
     expect(msg).toContain("**PASS**");
     expect(msg).toContain("All validations passed");
@@ -272,7 +198,7 @@ describe("renderSessionMessage", () => {
 
   it("renders findings section when findings exist", () => {
     const msg = renderSessionMessage(
-      makeResult({
+      makeOpenCodeResult({
         findings: [makeFinding()],
         verdict: "FAIL",
       }),
@@ -285,7 +211,7 @@ describe("renderSessionMessage", () => {
 
   it("renders remaining gaps when present", () => {
     const msg = renderSessionMessage(
-      makeResult({
+      makeOpenCodeResult({
         remainingGaps: [
           {
             area: "auth",
@@ -302,13 +228,16 @@ describe("renderSessionMessage", () => {
   });
 
   it("omits evidence header when no evidence exists", () => {
-    const msg = renderSessionMessage(makeResult({ evidence: [] }), redact);
+    const msg = renderSessionMessage(
+      makeOpenCodeResult({ evidence: [] }),
+      redact,
+    );
     expect(msg).not.toContain("## Validations Executed");
   });
 
   it("applies secret redaction", () => {
     const msg = renderSessionMessage(
-      makeResult({ summary: "key sk-supersecret used" }),
+      makeOpenCodeResult({ summary: "key sk-supersecret used" }),
       (t) => t.replace("sk-supersecret", "***"),
     );
     expect(msg).toContain("***");
@@ -323,7 +252,11 @@ describe("OpenCodeReporter", () => {
       client,
       makeDefaultReporterConfig({ toastEnabled: false }),
     );
-    const result = await reporter.publish(makeResult(), makeContext(), []);
+    const result = await reporter.publish(
+      makeOpenCodeResult(),
+      makeContext(),
+      [],
+    );
     expect(result.messageDelivered).toBe(true);
     expect(result.sessionId).toBe("sess-123");
     expect(result.warnings).toHaveLength(0);
@@ -333,13 +266,32 @@ describe("OpenCodeReporter", () => {
     );
   });
 
+  it("does not send when messageEnabled is false", async () => {
+    const client = new FakeOpenCodeClient();
+    const reporter = new OpenCodeReporter(
+      client,
+      makeDefaultReporterConfig({ messageEnabled: false, toastEnabled: false }),
+    );
+    const result = await reporter.publish(
+      makeOpenCodeResult(),
+      makeContext(),
+      [],
+    );
+    expect(result.messageDelivered).toBe(false);
+    expect(client.messages).toHaveLength(0);
+  });
+
   it("does not send in dry-run mode", async () => {
     const client = new FakeOpenCodeClient();
     const reporter = new OpenCodeReporter(
       client,
       makeDefaultReporterConfig({ dryRun: true, toastEnabled: true }),
     );
-    const result = await reporter.publish(makeResult(), makeContext(), []);
+    const result = await reporter.publish(
+      makeOpenCodeResult(),
+      makeContext(),
+      [],
+    );
     expect(result.messageDelivered).toBe(true);
     expect(result.dryRun).toBe(true);
     expect(result.messageId).toBe("(dry-run)");
@@ -354,7 +306,7 @@ describe("OpenCodeReporter", () => {
       makeDefaultReporterConfig({ toastEnabled: true }),
     );
     await reporter.publish(
-      makeResult({ verdict: "FAIL", confidence: "HIGH" }),
+      makeOpenCodeResult({ verdict: "FAIL", confidence: "HIGH" }),
       makeContext(),
       [],
     );
@@ -369,7 +321,7 @@ describe("OpenCodeReporter", () => {
       client,
       makeDefaultReporterConfig({ toastEnabled: true }),
     );
-    await reporter.publish(makeResult(), makeContext(), []);
+    await reporter.publish(makeOpenCodeResult(), makeContext(), []);
     expect(client.toasts).toHaveLength(1);
     expect(client.toasts[0].variant).toBe("success");
   });
@@ -381,7 +333,11 @@ describe("OpenCodeReporter", () => {
       client,
       makeDefaultReporterConfig({ toastEnabled: false }),
     );
-    const result = await reporter.publish(makeResult(), makeContext(), []);
+    const result = await reporter.publish(
+      makeOpenCodeResult(),
+      makeContext(),
+      [],
+    );
     expect(result.messageDelivered).toBe(false);
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("Message delivery failed");
@@ -395,7 +351,7 @@ describe("OpenCodeReporter", () => {
       client,
       makeDefaultReporterConfig({ toastEnabled: false }),
     );
-    await reporter.publish(makeResult(), makeContext(), []);
+    await reporter.publish(makeOpenCodeResult(), makeContext(), []);
     // One attempt, no retries for non-server errors
     expect(client.sendAttempts).toBe(1);
   });
@@ -408,7 +364,7 @@ describe("OpenCodeReporter", () => {
       client,
       makeDefaultReporterConfig({ toastEnabled: false, maxRetries: 2 }),
     );
-    await reporter.publish(makeResult(), makeContext(), []);
+    await reporter.publish(makeOpenCodeResult(), makeContext(), []);
     // Initial attempt + 2 retries = 3
     expect(client.sendAttempts).toBe(3);
   });
@@ -420,13 +376,13 @@ describe("OpenCodeReporter", () => {
       makeDefaultReporterConfig({ toastEnabled: false }),
     );
     await reporter.publish(
-      makeResult({ summary: "used token secret1234 here" }),
+      makeOpenCodeResult({ summary: "used token secret1234 here" }),
       makeContext(),
       ["secret1234"],
     );
     const text = client.messages[0].request.text;
     expect(text).not.toContain("secret1234");
-    expect(text).toContain("***");
+    expect(text).toContain("[REDACTED]");
   });
 
   it("records toast failure as warning", async () => {
@@ -439,7 +395,11 @@ describe("OpenCodeReporter", () => {
       client,
       makeDefaultReporterConfig({ toastEnabled: true }),
     );
-    const result = await reporter.publish(makeResult(), makeContext(), []);
+    const result = await reporter.publish(
+      makeOpenCodeResult(),
+      makeContext(),
+      [],
+    );
     expect(result.messageDelivered).toBe(true);
     expect(result.warnings).toHaveLength(1);
     expect(result.warnings[0]).toContain("Toast notification failed");
@@ -464,15 +424,6 @@ describe("OpenCodeContextSchema", () => {
 });
 
 describe("FakeOpenCodeClient", () => {
-  it("creates sessions with incrementing IDs", async () => {
-    const client = new FakeOpenCodeClient();
-    const s1 = await client.createSession("QE run");
-    const s2 = await client.createSession();
-    expect(s1.sessionId).not.toBe(s2.sessionId);
-    expect(s1.title).toBe("QE run");
-    expect(client.sessionCreations).toHaveLength(2);
-  });
-
   it("records sent messages", async () => {
     const client = new FakeOpenCodeClient();
     await client.sendMessage({ sessionId: "s1", text: "hello" });
@@ -502,22 +453,6 @@ describe("HttpOpenCodeClient", () => {
     expect(seen[0].url).toContain("/session/sess-1/prompt_async");
     const body = seen[0].body as { parts: { type: string; text: string }[] };
     expect(body.parts[0].text).toBe("verdict");
-  });
-
-  it("creates session via POST /session", async () => {
-    const seen: { url: string; method: string }[] = [];
-    const fetchFn: HttpRequestFn = async (url, options) => {
-      seen.push({ url, method: options.method });
-      return { status: 200, json: async () => ({ id: "sess-9" }) };
-    };
-    const client = new HttpOpenCodeClient(
-      "http://127.0.0.1:4096",
-      undefined,
-      fetchFn,
-    );
-    const res = await client.createSession("QE run");
-    expect(res.sessionId).toBe("sess-9");
-    expect(seen[0].url).toContain("/session");
   });
 
   it("throws OpenCodeApiError on non-2xx", async () => {
@@ -553,7 +488,7 @@ describe("HttpOpenCodeClient", () => {
 
 describe("validateResultForPublishing", () => {
   it("accepts a valid QEResult", () => {
-    const result = validateResultForPublishing(makeResult());
+    const result = validateResultForPublishing(makeOpenCodeResult());
     expect(result.verdict).toBe("PASS");
   });
 
@@ -563,17 +498,14 @@ describe("validateResultForPublishing", () => {
 });
 
 describe("persistence", () => {
-  it("persists result and session message under .qe/runs", async () => {
+  it("persists session message under .qe/runs", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qe-oc-"));
     try {
-      const result = makeResult();
-      const resultPath = await persistResult(result, dir);
+      const result = makeOpenCodeResult();
       const messagePath = await persistSessionMessage(result, dir, []);
-      const persisted = JSON.parse(await readFile(resultPath, "utf-8"));
-      expect(persisted.executionId).toBe("exec-oc-001");
       const message = await readFile(messagePath, "utf-8");
       expect(message).toContain("QE Agent Verdict — PASS");
-      expect(resultPath).toContain(join(".qe", "runs", "exec-oc-001"));
+      expect(messagePath).toContain(join(".qe", "runs", "exec-oc-001"));
       expect(messagePath).toContain("opencode-message.md");
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -584,7 +516,7 @@ describe("persistence", () => {
     const dir = await mkdtemp(join(tmpdir(), "qe-oc-"));
     try {
       const messagePath = await persistSessionMessage(
-        makeResult({ summary: "leaked secret1234 value" }),
+        makeOpenCodeResult({ summary: "leaked secret1234 value" }),
         dir,
         ["secret1234"],
       );
