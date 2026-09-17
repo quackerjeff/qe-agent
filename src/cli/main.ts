@@ -12,6 +12,7 @@ import { runVerify } from "./verify.js";
 import { runReview } from "./review.js";
 import { runGitHubPublish } from "./github-publish.js";
 import { runOpenCodePublish } from "./opencode-publish.js";
+import { runKiroPublish } from "./kiro-publish.js";
 
 /**
  * Load a git-ignored .env file (KEY=VALUE lines) from the repository root
@@ -213,6 +214,42 @@ async function main(): Promise<void> {
       } catch (err) {
         logger.error(
           err instanceof Error ? err.message : "OpenCode publish failed",
+        );
+        process.exit(1);
+      }
+    });
+
+  const kiro = program
+    .command("kiro")
+    .description("Kiro harness integration commands");
+
+  kiro
+    .command("publish")
+    .description("Publish QE result to Kiro via a headless CLI run")
+    .requiredOption("--result <path>", "Path to QE result JSON file")
+    .option("--repo <path>", "Repository path (default: cwd)")
+    .option("--session <id>", "Kiro session ID to resume")
+    .option("--agent <name>", "Kiro agent profile to use")
+    .option(
+      "--trust-all-tools",
+      "Let the Kiro agent act on the verdict (auto-approve tools)",
+    )
+    .option("--timeout <ms>", "Kiro CLI run timeout in milliseconds")
+    .option("--dry-run", "Preview delivery without running Kiro CLI")
+    .option("--json", "Output publishing result as JSON")
+    .action(async (opts) => {
+      const logger = createLogger("INFO");
+      try {
+        await runKiroPublish(
+          {
+            ...opts,
+            timeoutMs: opts.timeout ? parseInt(opts.timeout, 10) : undefined,
+          },
+          logger,
+        );
+      } catch (err) {
+        logger.error(
+          err instanceof Error ? err.message : "Kiro publish failed",
         );
         process.exit(1);
       }

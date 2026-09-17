@@ -198,6 +198,16 @@ npx tsx src/cli/main.ts opencode publish --result .qe/runs/<executionId>/result.
 
 OpenCode is an invocation mechanism, not part of the QE core — see [ADR-011](docs/adr/011-opencode-as-invocation-integration.md).
 
+### Kiro Harness Integration
+
+QE Agent also integrates with [Amazon Kiro](https://kiro.dev). Delivery runs the real `kiro-cli` in headless mode — no server API, no test doubles:
+
+```bash
+npx tsx src/cli/main.ts kiro publish --result .qe/runs/<executionId>/result.json --trust-all-tools
+```
+
+The repository ships a committed `.kiro/` directory with a **QE operator agent**, always-included steering, boundary-enforcing hooks, and a `/qe-verify` skill. See [ADR-013](docs/adr/013-kiro-as-invocation-integration.md).
+
 ### Verdicts
 
 QE verdicts reflect the strength of evidence:

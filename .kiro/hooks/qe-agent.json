@@ -1,0 +1,27 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "qe-review-on-stop",
+      "description": "Run a QE Agent change review after the agent finishes responding; report the verdict back into the session",
+      "trigger": "Stop",
+      "action": {
+        "type": "command",
+        "command": "npx tsx src/cli/main.ts review --base main --json --output .qe/runs/kiro-hook-latest.json && cat .qe/runs/kiro-hook-latest.json || echo 'QE review unavailable'"
+      },
+      "timeout": 300,
+      "enabled": false
+    },
+    {
+      "name": "qe-verify-before-write",
+      "description": "Before the agent writes to source files, remind it of the QE production-source boundary",
+      "trigger": "PreToolUse",
+      "matcher": "write|fs_write|apply_patch",
+      "action": {
+        "type": "agent",
+        "prompt": "Before writing: remember the QE Agent's production-source boundary — test code and QE metadata may be written; application/production source must not be modified to make validation pass."
+      },
+      "enabled": true
+    }
+  ]
+}

@@ -91,6 +91,20 @@ export const QEConfigSchema = z.object({
     })
     .default({}),
 
+  kiro: z
+    .object({
+      // Deliver QE results to Kiro via headless kiro-cli runs (ADR-013).
+      promptEnabled: z.boolean().default(true),
+      /**
+       * Allow the Kiro agent to act on the delivered verdict (run the CLI
+       * with --trust-all-tools so tools auto-approve in headless mode).
+       * Default false restricts Kiro to read-only interpretation.
+       */
+      trustAllTools: z.boolean().default(false),
+      dryRun: z.boolean().default(false),
+    })
+    .default({}),
+
   memory: z
     .object({
       enabled: z.boolean().default(true),

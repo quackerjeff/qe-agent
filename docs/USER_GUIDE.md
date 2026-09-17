@@ -57,6 +57,7 @@ Commands:
   review [options]   Run QE reasoning against a Git baseline
   github             GitHub integration commands
   opencode           OpenCode harness integration commands
+  kiro               Kiro harness integration commands
   help [command]     display help for command
 ```
 
@@ -539,6 +540,33 @@ The repository ships a committed `.opencode/` directory for teams using the Open
 - `.opencode/opencode.json` — project config registering the instructions and a `/qe` command.
 
 These files invoke the same CLI documented in this guide; they add no new QE behavior.
+
+### Kiro harness integration
+
+QE Agent integrates with [Amazon Kiro](https://kiro.dev) (see [ADR-013](adr/013-kiro-as-invocation-integration.md)). Kiro has no server API — delivery runs the real `kiro-cli` in headless mode:
+
+```bash
+node dist/cli/main.js kiro publish \
+  --result .qe/runs/<executionId>/result.json \
+  --repo /path/to/project
+```
+
+Options:
+
+| Option | Description |
+|--------|-------------|
+| `--result <path>` | Path to QE result JSON file (**required**) |
+| `--repo <path>` | Repository path (default: current directory) |
+| `--session <id>` | Kiro session ID to resume |
+| `--agent <name>` | Kiro agent profile to use |
+| `--trust-all-tools` | Let the Kiro agent act on the verdict (default: read-only interpretation) |
+| `--timeout <ms>` | Kiro CLI run timeout |
+| `--dry-run` | Preview delivery without running Kiro CLI |
+| `--json` | Output publishing result as JSON |
+
+By default the Kiro agent receives the verdict with read-only tools (`read`, `grep`, `fs_read`); it can interpret but not modify. `--trust-all-tools` (or `kiro.trustAllTools` in `.qe/config.yml`) lets Kiro act on findings — tools auto-approve in headless mode.
+
+The repository also ships a committed `.kiro/` directory: a `qe` agent profile (`.kiro/agents/qe.md`), always-included steering (`.kiro/steering/qe-integration.md`), hooks enforcing the QE production-source boundary (`.kiro/hooks/qe-agent.json`), and a `/qe-verify` skill (`.kiro/skills/qe-verify/SKILL.md`).
 
 ## Browser Execution Without a Local Browser
 

@@ -45,3 +45,4 @@ Minor clarifications that do not alter the decision may be made directly.
 - [ADR-010 — State-Machine and Single-Orchestrator Architecture](010-state-machine-and-single-orchestrator-architecture.md)
 - [ADR-011 — OpenCode Harness as an Invocation Integration](011-opencode-as-invocation-integration.md)
 - [ADR-012 — Playwright MCP as Browser Fallback Adapter](012-playwright-mcp-browser-fallback.md)
+- [ADR-013 — Kiro Harness as an Invocation Integration](013-kiro-as-invocation-integration.md)
