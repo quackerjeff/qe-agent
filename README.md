@@ -182,6 +182,22 @@ npx tsx src/cli/main.ts review --base main --json
 
 Change review additionally performs deterministic Git diff collection and semantic change analysis. Failures are classified as INTRODUCED, PRE_EXISTING, or UNKNOWN through optional baseline comparison.
 
+### OpenCode Harness Integration
+
+QE Agent runs inside the [OpenCode](https://opencode.ai) AI coding harness. The repository ships a committed `.opencode/` directory with:
+
+- a read-only **QE operator subagent** (`@qe`) that runs the CLI and reports evidence-backed verdicts;
+- slash commands `/qe-analyze`, `/qe-verify <requirements-file>`, `/qe-review <base>`;
+- custom tools (`qe_analyze`, `qe_verify`, `qe_review`, `qe_opencode_publish`) exposed via `.opencode/plugins/qe-agent.ts`.
+
+To deliver a completed QE result into a running OpenCode session:
+
+```bash
+npx tsx src/cli/main.ts opencode publish --result .qe/runs/<executionId>/result.json --session <session-id>
+```
+
+OpenCode is an invocation mechanism, not part of the QE core — see [ADR-011](docs/adr/011-opencode-as-invocation-integration.md).
+
 ### Verdicts
 
 QE verdicts reflect the strength of evidence:

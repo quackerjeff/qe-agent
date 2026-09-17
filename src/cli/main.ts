@@ -11,6 +11,7 @@ import { runExec } from "./exec.js";
 import { runVerify } from "./verify.js";
 import { runReview } from "./review.js";
 import { runGitHubPublish } from "./github-publish.js";
+import { runOpenCodePublish } from "./opencode-publish.js";
 
 async function getVersion(): Promise<string> {
   const __filename = fileURLToPath(import.meta.url);
@@ -154,6 +155,30 @@ async function main(): Promise<void> {
       } catch (err) {
         logger.error(
           err instanceof Error ? err.message : "GitHub publish failed",
+        );
+        process.exit(1);
+      }
+    });
+
+  const opencode = program
+    .command("opencode")
+    .description("OpenCode harness integration commands");
+
+  opencode
+    .command("publish")
+    .description("Publish QE result to an OpenCode session")
+    .requiredOption("--result <path>", "Path to QE result JSON file")
+    .option("--repo <path>", "Repository path (default: cwd)")
+    .option("--session <id>", "OpenCode session ID to deliver into")
+    .option("--dry-run", "Preview delivery without sending")
+    .option("--json", "Output publishing result as JSON")
+    .action(async (opts) => {
+      const logger = createLogger("INFO");
+      try {
+        await runOpenCodePublish(opts, logger);
+      } catch (err) {
+        logger.error(
+          err instanceof Error ? err.message : "OpenCode publish failed",
         );
         process.exit(1);
       }

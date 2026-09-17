@@ -43,3 +43,4 @@ Minor clarifications that do not alter the decision may be made directly.
 - [ADR-008 — Playwright as Initial Browser Adapter](008-playwright-as-initial-browser-adapter.md)
 - [ADR-009 — Canonical QE Result Contract](009-canonical-qe-result-contract.md)
 - [ADR-010 — State-Machine and Single-Orchestrator Architecture](010-state-machine-and-single-orchestrator-architecture.md)
+- [ADR-011 — OpenCode Harness as an Invocation Integration](011-opencode-as-invocation-integration.md)

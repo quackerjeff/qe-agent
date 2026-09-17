@@ -56,6 +56,7 @@ Commands:
   verify [options]   Run QE reasoning against supplied requirements
   review [options]   Run QE reasoning against a Git baseline
   github             GitHub integration commands
+  opencode           OpenCode harness integration commands
   help [command]     display help for command
 ```
 
@@ -486,6 +487,41 @@ Options:
 | `--repo <path>` | Repository path (default: current directory) |
 | `--dry-run` | Preview publishing without remote writes |
 | `--json` | Output publishing result as JSON |
+
+### `opencode publish`
+
+Deliver a QE result into an OpenCode session (see [ADR-011](adr/011-opencode-as-invocation-integration.md)). OpenCode is an invocation mechanism — the QE core remains harness-independent.
+
+```bash
+node dist/cli/main.js opencode publish \
+  --result .qe/runs/<executionId>/result.json \
+  --session <opencode-session-id>
+```
+
+Options:
+
+| Option | Description |
+|--------|-------------|
+| `--result <path>` | Path to QE result JSON file (**required**) |
+| `--repo <path>` | Repository path (default: current directory) |
+| `--session <id>` | OpenCode session ID to deliver into |
+| `--dry-run` | Preview delivery without sending |
+| `--json` | Output publishing result as JSON |
+
+The session target is resolved from `--session`, the `QE_OPENCODE_SESSION_ID` environment variable, or dry-run. The OpenCode server URL defaults to `http://127.0.0.1:4096` and can be overridden with `OPENCODE_SERVER_URL`. If the server is protected with `OPENCODE_SERVER_PASSWORD`, it is used for basic auth and redacted from all output.
+
+The delivered message is a markdown verdict summary rendered from the QE result with known secrets redacted. Delivery uses the `prompt_async` server endpoint and is additionally persisted under `.qe/runs/<executionId>/opencode-message.md`.
+
+### OpenCode harness files
+
+The repository ships a committed `.opencode/` directory for teams using the OpenCode harness:
+
+- `.opencode/agents/qe.md` — a read-only "QE operator" subagent that runs the QE CLI and reports evidence-backed verdicts;
+- `.opencode/commands/qe-analyze.md`, `qe-verify.md`, `qe-review.md` — slash commands (`/qe-analyze`, `/qe-verify <file>`, `/qe-review <base>`);
+- `.opencode/plugins/qe-agent.ts` — custom tools (`qe_analyze`, `qe_verify`, `qe_review`, `qe_opencode_publish`) wrapping the deterministic QE CLI;
+- `.opencode/opencode.json` — project config registering the instructions and a `/qe` command.
+
+These files invoke the same CLI documented in this guide; they add no new QE behavior.
 
 ## Understanding QE Output
 

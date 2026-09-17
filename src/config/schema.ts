@@ -79,6 +79,15 @@ export const QEConfigSchema = z.object({
     })
     .default({}),
 
+  opencode: z
+    .object({
+      // Deliver QE summaries into an OpenCode session (ADR-011).
+      messageEnabled: z.boolean().default(true),
+      toastEnabled: z.boolean().default(true),
+      dryRun: z.boolean().default(false),
+    })
+    .default({}),
+
   memory: z
     .object({
       enabled: z.boolean().default(true),
