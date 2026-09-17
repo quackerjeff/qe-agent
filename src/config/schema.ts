@@ -113,6 +113,15 @@ export const QEConfigSchema = z.object({
   reasoning: z
     .object({
       maxModelCalls: z.number().positive().default(12),
+      /**
+       * Per-call response token ceiling. Prompt-defined values are the
+       * minimum; this raises them uniformly — required for reasoning
+       * models where hidden thinking tokens count against the response
+       * budget, and for large structured outputs (gap analysis,
+       * test generation) that would otherwise truncate. No ceiling is
+       * imposed when unset.
+       */
+      maxOutputTokens: z.number().positive().optional(),
     })
     .default({}),
 });

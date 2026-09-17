@@ -2,16 +2,12 @@ import { describe, it, expect } from "vitest";
 import {
   OpenCodeContextSchema,
   VERDICT_TO_URGENCY,
-  FakeOpenCodeClient,
   OpenCodeApiError,
   HttpOpenCodeClient,
   parseOpenCodeContext,
-  FakeEnvironmentSource,
   isOpenCodeHarness,
   getOpenCodeServerPassword,
   mapVerdictToUrgency,
-  shouldFailHarness,
-  getHarnessExitCode,
   renderSessionMessage,
   OpenCodeReporter,
   validateResultForPublishing,
@@ -20,6 +16,10 @@ import {
   type OpenCodeReporterConfig,
   type HttpRequestFn,
 } from "../src/opencode/index.js";
+import {
+  StubOpenCodeClient,
+  StubEnvironmentSource,
+} from "./helpers/opencode-stubs.js";
 import { QEConfigSchema } from "../src/config/schema.js";
 import type { Verdict } from "../src/types/domain.js";
 import { makeResult, makeFinding } from "./helpers/qe-result-fixture.js";
@@ -63,7 +63,7 @@ function makeDefaultReporterConfig(
 
 describe("OpenCodeContext parsing", () => {
   it("parses complete environment", () => {
-    const env = new FakeEnvironmentSource({
+    const env = new StubEnvironmentSource({
       QE_OPENCODE_SESSION_ID: "sess-abc",
       OPENCODE_SERVER_URL: "http://localhost:9999",
       OPENCODE_SERVER_USERNAME: "user",
@@ -78,14 +78,14 @@ describe("OpenCodeContext parsing", () => {
   });
 
   it("returns null without a session ID", () => {
-    const env = new FakeEnvironmentSource({
+    const env = new StubEnvironmentSource({
       OPENCODE_SERVER_URL: "http://localhost:4096",
     });
     expect(parseOpenCodeContext(env)).toBeNull();
   });
 
   it("applies default server URL when unset", () => {
-    const env = new FakeEnvironmentSource({
+    const env = new StubEnvironmentSource({
       QE_OPENCODE_SESSION_ID: "sess-1",
     });
     const ctx = parseOpenCodeContext(env);
@@ -93,20 +93,11 @@ describe("OpenCodeContext parsing", () => {
   });
 
   it("rejects invalid server URLs", () => {
-    const env = new FakeEnvironmentSource({
+    const env = new StubEnvironmentSource({
       QE_OPENCODE_SESSION_ID: "sess-1",
       OPENCODE_SERVER_URL: "not-a-url",
     });
     expect(parseOpenCodeContext(env)).toBeNull();
-  });
-
-  it("parses optional session title", () => {
-    const env = new FakeEnvironmentSource({
-      QE_OPENCODE_SESSION_ID: "sess-1",
-      QE_OPENCODE_SESSION_TITLE: "QE run",
-    });
-    const ctx = parseOpenCodeContext(env);
-    expect(ctx!.sessionTitle).toBe("QE run");
   });
 });
 
@@ -114,19 +105,19 @@ describe("isOpenCodeHarness detection", () => {
   it("detects server URL", () => {
     expect(
       isOpenCodeHarness(
-        new FakeEnvironmentSource({ OPENCODE_SERVER_URL: "http://x:1" }),
+        new StubEnvironmentSource({ OPENCODE_SERVER_URL: "http://x:1" }),
       ),
     ).toBe(true);
   });
 
   it("detects OPENCODE_BIN", () => {
     expect(
-      isOpenCodeHarness(new FakeEnvironmentSource({ OPENCODE_BIN: "/bin/oc" })),
+      isOpenCodeHarness(new StubEnvironmentSource({ OPENCODE_BIN: "/bin/oc" })),
     ).toBe(true);
   });
 
   it("returns false outside the harness", () => {
-    expect(isOpenCodeHarness(new FakeEnvironmentSource({}))).toBe(false);
+    expect(isOpenCodeHarness(new StubEnvironmentSource({}))).toBe(false);
   });
 });
 
@@ -134,14 +125,14 @@ describe("getOpenCodeServerPassword", () => {
   it("reads password from environment", () => {
     expect(
       getOpenCodeServerPassword(
-        new FakeEnvironmentSource({ OPENCODE_SERVER_PASSWORD: "secret" }),
+        new StubEnvironmentSource({ OPENCODE_SERVER_PASSWORD: "secret" }),
       ),
     ).toBe("secret");
   });
 
   it("returns undefined when unset", () => {
     expect(
-      getOpenCodeServerPassword(new FakeEnvironmentSource({})),
+      getOpenCodeServerPassword(new StubEnvironmentSource({})),
     ).toBeUndefined();
   });
 });
@@ -173,14 +164,6 @@ describe("verdict mapping", () => {
   it("maps failures to error", () => {
     expect(mapVerdictToUrgency("FAIL")).toBe("error");
     expect(mapVerdictToUrgency("BLOCKED")).toBe("error");
-  });
-
-  it("computes harness exit codes from failOn set", () => {
-    const failOn: Verdict[] = ["FAIL", "BLOCKED"];
-    expect(getHarnessExitCode("PASS", failOn)).toBe(0);
-    expect(getHarnessExitCode("FAIL", failOn)).toBe(1);
-    expect(getHarnessExitCode("BLOCKED", failOn)).toBe(1);
-    expect(shouldFailHarness("NEEDS_REVIEW", failOn)).toBe(false);
   });
 });
 
@@ -247,14 +230,14 @@ describe("renderSessionMessage", () => {
 
 describe("OpenCodeReporter", () => {
   it("delivers message to session", async () => {
-    const client = new FakeOpenCodeClient();
+    const client = new StubOpenCodeClient();
     const reporter = new OpenCodeReporter(
-      client,
       makeDefaultReporterConfig({ toastEnabled: false }),
     );
     const result = await reporter.publish(
       makeOpenCodeResult(),
       makeContext(),
+      client,
       [],
     );
     expect(result.messageDelivered).toBe(true);
@@ -267,14 +250,14 @@ describe("OpenCodeReporter", () => {
   });
 
   it("does not send when messageEnabled is false", async () => {
-    const client = new FakeOpenCodeClient();
+    const client = new StubOpenCodeClient();
     const reporter = new OpenCodeReporter(
-      client,
       makeDefaultReporterConfig({ messageEnabled: false, toastEnabled: false }),
     );
     const result = await reporter.publish(
       makeOpenCodeResult(),
       makeContext(),
+      client,
       [],
     );
     expect(result.messageDelivered).toBe(false);
@@ -282,32 +265,43 @@ describe("OpenCodeReporter", () => {
   });
 
   it("does not send in dry-run mode", async () => {
-    const client = new FakeOpenCodeClient();
     const reporter = new OpenCodeReporter(
-      client,
       makeDefaultReporterConfig({ dryRun: true, toastEnabled: true }),
     );
     const result = await reporter.publish(
       makeOpenCodeResult(),
       makeContext(),
+      undefined,
       [],
     );
     expect(result.messageDelivered).toBe(true);
     expect(result.dryRun).toBe(true);
-    expect(result.messageId).toBe("(dry-run)");
-    expect(client.messages).toHaveLength(0);
-    expect(client.toasts).toHaveLength(0);
+    expect(result.messageId).toBeUndefined();
+  });
+
+  it("warns when no client is provided outside dry-run", async () => {
+    const reporter = new OpenCodeReporter(
+      makeDefaultReporterConfig({ toastEnabled: false }),
+    );
+    const result = await reporter.publish(
+      makeOpenCodeResult(),
+      makeContext(),
+      undefined,
+      [],
+    );
+    expect(result.messageDelivered).toBe(false);
+    expect(result.warnings[0]).toContain("no OpenCode client provided");
   });
 
   it("sends toast on failure verdicts when enabled", async () => {
-    const client = new FakeOpenCodeClient();
+    const client = new StubOpenCodeClient();
     const reporter = new OpenCodeReporter(
-      client,
       makeDefaultReporterConfig({ toastEnabled: true }),
     );
     await reporter.publish(
       makeOpenCodeResult({ verdict: "FAIL", confidence: "HIGH" }),
       makeContext(),
+      client,
       [],
     );
     expect(client.toasts).toHaveLength(1);
@@ -316,26 +310,25 @@ describe("OpenCodeReporter", () => {
   });
 
   it("sends success toast for PASS verdicts", async () => {
-    const client = new FakeOpenCodeClient();
+    const client = new StubOpenCodeClient();
     const reporter = new OpenCodeReporter(
-      client,
       makeDefaultReporterConfig({ toastEnabled: true }),
     );
-    await reporter.publish(makeOpenCodeResult(), makeContext(), []);
+    await reporter.publish(makeOpenCodeResult(), makeContext(), client, []);
     expect(client.toasts).toHaveLength(1);
     expect(client.toasts[0].variant).toBe("success");
   });
 
   it("records warning and continues when message delivery fails", async () => {
-    const client = new FakeOpenCodeClient();
+    const client = new StubOpenCodeClient();
     client.shouldFailMessage = true;
     const reporter = new OpenCodeReporter(
-      client,
       makeDefaultReporterConfig({ toastEnabled: false }),
     );
     const result = await reporter.publish(
       makeOpenCodeResult(),
       makeContext(),
+      client,
       [],
     );
     expect(result.messageDelivered).toBe(false);
@@ -344,40 +337,38 @@ describe("OpenCodeReporter", () => {
   });
 
   it("does not retry client errors (only server errors)", async () => {
-    const client = new FakeOpenCodeClient();
+    const client = new StubOpenCodeClient();
     client.shouldFailMessage = true;
     client.failureError = new OpenCodeApiError("bad request", 400, false);
     const reporter = new OpenCodeReporter(
-      client,
       makeDefaultReporterConfig({ toastEnabled: false }),
     );
-    await reporter.publish(makeOpenCodeResult(), makeContext(), []);
+    await reporter.publish(makeOpenCodeResult(), makeContext(), client, []);
     // One attempt, no retries for non-server errors
     expect(client.sendAttempts).toBe(1);
   });
 
   it("retries server errors up to maxRetries", async () => {
-    const client = new FakeOpenCodeClient();
+    const client = new StubOpenCodeClient();
     client.shouldFailMessage = true;
     client.failureError = new OpenCodeApiError("server boom", 500, true);
     const reporter = new OpenCodeReporter(
-      client,
       makeDefaultReporterConfig({ toastEnabled: false, maxRetries: 2 }),
     );
-    await reporter.publish(makeOpenCodeResult(), makeContext(), []);
+    await reporter.publish(makeOpenCodeResult(), makeContext(), client, []);
     // Initial attempt + 2 retries = 3
     expect(client.sendAttempts).toBe(3);
   });
 
   it("redacts known secrets from delivered message", async () => {
-    const client = new FakeOpenCodeClient();
+    const client = new StubOpenCodeClient();
     const reporter = new OpenCodeReporter(
-      client,
       makeDefaultReporterConfig({ toastEnabled: false }),
     );
     await reporter.publish(
       makeOpenCodeResult({ summary: "used token secret1234 here" }),
       makeContext(),
+      client,
       ["secret1234"],
     );
     const text = client.messages[0].request.text;
@@ -386,18 +377,18 @@ describe("OpenCodeReporter", () => {
   });
 
   it("records toast failure as warning", async () => {
-    const client = new FakeOpenCodeClient();
+    const client = new StubOpenCodeClient();
     const originalShowToast = client.showToast.bind(client);
     client.showToast = async () => {
       throw new Error("toast unavailable");
     };
     const reporter = new OpenCodeReporter(
-      client,
       makeDefaultReporterConfig({ toastEnabled: true }),
     );
     const result = await reporter.publish(
       makeOpenCodeResult(),
       makeContext(),
+      client,
       [],
     );
     expect(result.messageDelivered).toBe(true);
@@ -425,7 +416,7 @@ describe("OpenCodeContextSchema", () => {
 
 describe("FakeOpenCodeClient", () => {
   it("records sent messages", async () => {
-    const client = new FakeOpenCodeClient();
+    const client = new StubOpenCodeClient();
     await client.sendMessage({ sessionId: "s1", text: "hello" });
     expect(client.messages).toHaveLength(1);
     expect(client.messages[0].request.text).toBe("hello");

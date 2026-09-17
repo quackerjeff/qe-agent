@@ -5,7 +5,6 @@ import { loadConfig, getDefaultConfig } from "../config/index.js";
 import {
   validateResultForPublishing,
   OpenCodeReporter,
-  FakeOpenCodeClient,
   HttpOpenCodeClient,
   parseOpenCodeContext,
   getOpenCodeServerPassword,
@@ -13,7 +12,6 @@ import {
   isOpenCodeHarness,
   persistSessionMessage,
   type OpenCodeReporterConfig,
-  type OpenCodeClient,
   type EnvironmentSource,
 } from "../opencode/index.js";
 
@@ -106,27 +104,30 @@ export async function runOpenCodePublish(
     maxRetries: 2,
   };
 
-  let client: OpenCodeClient;
+  const reporter = new OpenCodeReporter(reporterConfig);
+
+  let publishResult;
   if (dryRun) {
-    client = new FakeOpenCodeClient();
-  } else {
-    client = new HttpOpenCodeClient(
-      effectiveContext.serverUrl,
-      {
-        username: effectiveContext.username,
-        password: effectiveContext.password,
-      },
+    // Dry-run reports what would be delivered; no client is constructed
+    // and no network call can occur.
+    publishResult = await reporter.publish(
+      qeResult,
+      effectiveContext,
       undefined,
+      knownSecrets,
+    );
+  } else {
+    const client = new HttpOpenCodeClient(effectiveContext.serverUrl, {
+      username: effectiveContext.username,
+      password: effectiveContext.password,
+    });
+    publishResult = await reporter.publish(
+      qeResult,
+      effectiveContext,
+      client,
+      knownSecrets,
     );
   }
-
-  const reporter = new OpenCodeReporter(client, reporterConfig);
-
-  const publishResult = await reporter.publish(
-    qeResult,
-    effectiveContext,
-    knownSecrets,
-  );
 
   await persistSessionMessage(qeResult, repoPath, knownSecrets);
 

@@ -778,6 +778,7 @@ reasoning:
 | `model.model` | — | Model name (e.g., `gpt-4o`, `gpt-4o-mini`) |
 | `model.tpmLimit` | — | Tokens-per-minute throughput limit |
 | `reasoning.maxModelCalls` | — | Maximum model calls per run |
+| `reasoning.maxOutputTokens` | — | Per-call response-token floor. Raises prompt-defined ceilings when using reasoning models whose hidden thinking tokens count against the response budget (e.g. ollama/OpenAI-compatible endpoints serving reasoning models). Never lowers. Unset = no floor. |
 | `memory.enabled` | — | Whether project memory persists across runs |
 
 ## Recommended First Run

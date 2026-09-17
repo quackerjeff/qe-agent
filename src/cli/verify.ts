@@ -74,6 +74,7 @@ export async function runVerify(
     gateway,
     logger: effectiveLogger,
     maxModelCalls: explicitMaxModelCalls,
+    minResponseTokens: config.reasoning.maxOutputTokens,
     modelTokenLimit: resolveModelTokenLimit(config),
     tpmLimit: resolveModelTpmLimit(config),
     browserCapability: createBrowserCapability(config),
@@ -91,6 +92,7 @@ export async function runVerify(
 
   const request: QERequest = {
     repositoryPath: repoPath,
+    pathSource: options.repo ? "explicit" : "inferred",
     requirements,
     profile,
     mode: "repository",

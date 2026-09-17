@@ -30,7 +30,12 @@ export async function runAnalyze(
     process.stderr.write(`Analyzing repository at ${targetPath}...\n`);
   }
 
-  const profile = await analyzeRepository({ targetPath });
+  const profile = await analyzeRepository({
+    targetPath,
+    // --repo was explicitly given: the path is authoritative and the
+    // root search must not escape above it.
+    pathSource: options.repo ? "explicit" : "inferred",
+  });
 
   const result: AnalysisResult = {
     repositoryProfile: profile,

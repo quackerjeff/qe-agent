@@ -19,8 +19,6 @@ export const OpenCodeContextSchema = z.object({
   username: z.string().optional(),
   /** Optional password for HTTP basic auth (OPENCODE_SERVER_PASSWORD). */
   password: z.string().optional(),
-  /** Optional session title used when creating a new session. */
-  sessionTitle: z.string().optional(),
 });
 
 export type OpenCodeContext = z.infer<typeof OpenCodeContextSchema>;

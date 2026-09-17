@@ -8,28 +8,17 @@ export {
   type OpenCodePublishingResult,
 } from "./types.js";
 
-export {
-  type OpenCodeClient,
-  FakeOpenCodeClient,
-  OpenCodeApiError,
-  type RecordedMessage,
-  type RecordedToast,
-} from "./client.js";
+export { type OpenCodeClient, OpenCodeApiError } from "./client.js";
 
 export {
   type EnvironmentSource,
   ProcessEnvironmentSource,
-  FakeEnvironmentSource,
   isOpenCodeHarness,
   parseOpenCodeContext,
   getOpenCodeServerPassword,
 } from "./environment.js";
 
-export {
-  mapVerdictToUrgency,
-  shouldFailHarness,
-  getHarnessExitCode,
-} from "./verdict.js";
+export { mapVerdictToUrgency } from "./verdict.js";
 
 export { renderSessionMessage } from "./summary.js";
 

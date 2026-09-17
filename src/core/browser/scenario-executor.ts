@@ -23,7 +23,6 @@ export async function executeScenarioActions(
     action: BrowserAction,
     context: BrowserExecutionContext,
   ) => Promise<BrowserActionResult>,
-  onEnvironmentError?: (err: unknown) => void,
 ): Promise<BrowserScenarioResult> {
   const startTime = Date.now();
   const actionResults: BrowserActionResult[] = [];
@@ -65,7 +64,6 @@ export async function executeScenarioActions(
     }
   } catch (err) {
     scenarioStatus = "BLOCKED";
-    onEnvironmentError?.(err);
     actionResults.push({
       action: scenario.actions[0] ?? {
         type: "NAVIGATE",

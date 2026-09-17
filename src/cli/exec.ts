@@ -55,7 +55,10 @@ export async function runExec(
   let proposal: CommandProposal;
 
   if (options.commandId) {
-    const profile = await analyzeRepository({ targetPath: repoPath });
+    const profile = await analyzeRepository({
+      targetPath: repoPath,
+      pathSource: options.repo ? "explicit" : "inferred",
+    });
     const discovered = profile.commands.find((c) => c.id === options.commandId);
     if (!discovered) {
       effectiveLogger.error(`Command ID '${options.commandId}' not found`);

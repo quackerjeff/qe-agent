@@ -10,14 +10,6 @@ export class ProcessEnvironmentSource implements EnvironmentSource {
   }
 }
 
-export class FakeEnvironmentSource implements EnvironmentSource {
-  constructor(private readonly vars: Record<string, string> = {}) {}
-
-  get(key: string): string | undefined {
-    return this.vars[key];
-  }
-}
-
 /**
  * Detect whether QE Agent is running inside the OpenCode harness.
  * OpenCode exposes OPENCODE_SERVER_URL (server mode) and OPENCODE_BIN /
@@ -51,9 +43,6 @@ export function parseOpenCodeContext(
 
   const password = env.get("OPENCODE_SERVER_PASSWORD");
   if (password) raw.password = password;
-
-  const sessionTitle = env.get("QE_OPENCODE_SESSION_TITLE");
-  if (sessionTitle) raw.sessionTitle = sessionTitle;
 
   const result = OpenCodeContextSchema.safeParse(raw);
   return result.success ? result.data : null;

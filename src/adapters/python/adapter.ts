@@ -31,7 +31,7 @@ export class PythonAdapter implements EcosystemAdapter {
     this.detectFrameworks(result, pyproject);
     this.detectTestFrameworks(inventory, result, pyproject);
     this.detectBuildSystems(result, pyproject);
-    this.discoverCommands(result);
+    this.discoverCommands(result, await this.detectVirtualEnv(inventory));
     this.populateCapabilities(result);
 
     return result;
@@ -281,7 +281,77 @@ export class PythonAdapter implements EcosystemAdapter {
     }
   }
 
-  private discoverCommands(result: AdapterResult): void {
+  /**
+   * Discover a project-scoped virtual environment. Projects with a venv
+   * must have all commands (installs, tests, apps) executed inside it —
+   * bare `pip`/`pytest` from PATH resolve against the wrong interpreter
+   * and can fail or corrupt global state. Venvs are environment state,
+   * not project source, so detection uses the filesystem directly
+   * (venvs are excluded from the file inventory).
+   */
+  private async detectVirtualEnv(
+    inventory: FileInventory,
+  ): Promise<string | undefined> {
+    const { access, constants } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const candidates = [
+      [".venv", "bin", "python"],
+      ["venv", "bin", "python"],
+      ["env", "bin", "python"],
+      [".venv", "Scripts", "python.exe"],
+      ["venv", "Scripts", "python.exe"],
+    ];
+    for (const [dir, bin, exe] of candidates) {
+      const pythonPath = join(inventory.root, dir, bin, exe);
+      try {
+        await access(pythonPath, constants.X_OK);
+        return pythonPath;
+      } catch {
+        // not present — try next candidate
+      }
+    }
+    return undefined;
+  }
+
+  private discoverCommands(
+    result: AdapterResult,
+    venvPython: string | undefined,
+  ): void {
+    // Project venv present: every command runs inside it via
+    // `<venv-python> -m <module>`, which works regardless of whether the
+    // venv's activation scripts or PATH shims are intact.
+    if (venvPython) {
+      if (result.testFrameworks.some((tf) => tf.id === "pytest")) {
+        result.commands.push({
+          id: "pytest:test",
+          name: "test",
+          category: "TEST",
+          command: `${venvPython} -m pytest`,
+          executable: venvPython,
+          args: ["-m", "pytest"],
+          source: "detected test framework in project virtual environment",
+          confidence: 0.95,
+          executionSupport: "STRUCTURED",
+        });
+      }
+
+      if (result.packageManagers.some((pm) => pm.id === "pip")) {
+        result.commands.push({
+          id: "pip:install",
+          name: "install",
+          category: "INSTALL",
+          command: `${venvPython} -m pip install -r requirements.txt`,
+          executable: venvPython,
+          args: ["-m", "pip", "install", "-r", "requirements.txt"],
+          source: "detected package manager in project virtual environment",
+          confidence: 0.95,
+          executionSupport: "STRUCTURED",
+        });
+      }
+
+      return;
+    }
+
     if (result.testFrameworks.some((tf) => tf.id === "pytest")) {
       result.commands.push({
         id: "pytest:test",

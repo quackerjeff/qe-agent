@@ -1,7 +1,7 @@
-import { resolve, join } from "node:path";
-import { mkdir, writeFile } from "node:fs/promises";
 import type { QEResult } from "../types/index.js";
 import { QEResultSchema } from "../types/index.js";
+import { resolve, join } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import { redactorFor } from "../core/reporting/index.js";
 import type { OpenCodeClient } from "./client.js";
 import { OpenCodeApiError } from "./client.js";
@@ -17,14 +17,17 @@ export interface OpenCodeReporterConfig {
 }
 
 export class OpenCodeReporter {
-  constructor(
-    private readonly client: OpenCodeClient,
-    private readonly config: OpenCodeReporterConfig,
-  ) {}
+  constructor(private readonly config: OpenCodeReporterConfig) {}
 
+  /**
+   * Publish a QE result into an OpenCode session. In dry-run mode no
+   * client is required — delivery is reported without any network call.
+   * Outside dry-run, the client is the real OpenCode server client.
+   */
   async publish(
     result: QEResult,
     context: OpenCodeContext,
+    client: OpenCodeClient | undefined,
     knownSecrets: string[] = [],
   ): Promise<OpenCodePublishingResult> {
     const redact = redactorFor(knownSecrets);
@@ -37,12 +40,24 @@ export class OpenCodeReporter {
       dryRun: this.config.dryRun,
     };
 
-    if (this.config.messageEnabled) {
-      await this.deliverMessage(message, context, publishingResult);
+    if (this.config.dryRun) {
+      publishingResult.messageDelivered = this.config.messageEnabled;
+      return publishingResult;
     }
 
-    if (this.config.toastEnabled && !this.config.dryRun) {
-      await this.sendToast(result, publishingResult);
+    if (!client) {
+      publishingResult.warnings.push(
+        "Message delivery failed: no OpenCode client provided",
+      );
+      return publishingResult;
+    }
+
+    if (this.config.messageEnabled) {
+      await this.deliverMessage(message, context, client, publishingResult);
+    }
+
+    if (this.config.toastEnabled) {
+      await this.sendToast(result, client, publishingResult);
     }
 
     return publishingResult;
@@ -51,18 +66,13 @@ export class OpenCodeReporter {
   private async deliverMessage(
     message: string,
     context: OpenCodeContext,
+    client: OpenCodeClient,
     out: OpenCodePublishingResult,
   ): Promise<void> {
-    if (this.config.dryRun) {
-      out.messageDelivered = true;
-      out.messageId = "(dry-run)";
-      return;
-    }
-
     let lastError: Error | undefined;
     for (let attempt = 0; attempt <= this.config.maxRetries; attempt++) {
       try {
-        const response = await this.client.sendMessage({
+        const response = await client.sendMessage({
           sessionId: context.sessionId,
           text: message,
         });
@@ -85,12 +95,13 @@ export class OpenCodeReporter {
 
   private async sendToast(
     result: QEResult,
+    client: OpenCodeClient,
     out: OpenCodePublishingResult,
   ): Promise<void> {
     const urgency = mapVerdictToUrgency(result.verdict);
     const toastMessage = `QE Agent: ${result.verdict} (${result.confidence} confidence)`;
     try {
-      await this.client.showToast(
+      await client.showToast(
         toastMessage,
         urgency === "error" ? "error" : "success",
       );

@@ -10,6 +10,9 @@ const PROJECT_MARKERS = [
   "package.json",
   "pyproject.toml",
   "setup.py",
+  "setup.cfg",
+  "requirements.txt",
+  "pytest.ini",
   "Cargo.toml",
   "go.mod",
   "pom.xml",
@@ -26,13 +29,42 @@ export interface RootDiscoveryResult {
   git: GitInfo;
 }
 
+export interface RootDiscoveryOptions {
+  /**
+   * How the target path was determined. This distinguishes the two
+   * supported invocation styles:
+   *
+   * - "explicit" — the user supplied the repository path (e.g. `--repo`).
+   *   That path is the authoritative root; the search never escapes above
+   *   it (stray project markers in parent directories must not hijack
+   *   the analysis target).
+   * - "inferred" (default) — the path was derived from the environment
+   *   (e.g. cwd in a local terminal or inside a GitHub Actions runner,
+   *   where the checkout may sit below the project root). The search may
+   *   walk upward to find the nearest project marker or git root.
+   */
+  source?: "explicit" | "inferred";
+}
+
 export async function discoverRoot(
   targetPath: string,
+  options: RootDiscoveryOptions = {},
 ): Promise<RootDiscoveryResult> {
+  const explicit = options.source === "explicit";
   const absolutePath = resolve(targetPath);
   await access(absolutePath, constants.R_OK);
 
   const git = await detectGit(absolutePath);
+
+  if (explicit) {
+    // An explicitly given repository path is the root, full stop. Git
+    // metadata may still be reported, but only when its root matches the
+    // given path (a parent repo must not swallow the target).
+    if (git.detected && git.root === absolutePath) {
+      return { root: absolutePath, git };
+    }
+    return { root: absolutePath, git: { detected: false } };
+  }
 
   const projectRoot = await findNearestProjectRoot(absolutePath);
   if (projectRoot) {

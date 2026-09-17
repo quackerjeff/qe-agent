@@ -6,8 +6,34 @@ import type { Plugin } from "@opencode-ai/plugin"
  *
  * Exposes QE Agent operations as custom tools so the harness model can
  * invoke deterministic QE execution instead of improvising its own
- * validation.
+ * validation. Each tool runs the real QE CLI as a child process.
  */
+
+/** Run the QE CLI and return its stdout, or a failure report. */
+function runQeCli(command: string, args: string[], directory: string): string {
+  const proc = Bun.spawnSync({
+    cmd: ["npx", "tsx", "src/cli/main.ts", command, ...args],
+    cwd: directory,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const stdout = proc.stdout.toString()
+  const stderr = proc.stderr.toString()
+  if (proc.exitCode !== 0) {
+    return `QE ${command} failed (exit ${proc.exitCode}):\n${stderr || stdout}`
+  }
+  return stdout
+}
+
+/** Append CLI flags only when a value was provided. */
+function optionalFlags(
+  flags: Array<[string, string | undefined]>,
+): string[] {
+  return flags.flatMap(([flag, value]) =>
+    value !== undefined ? [flag, value] : [],
+  )
+}
+
 export const QEAgentPlugin: Plugin = async ({ directory }) => {
   return {
     tool: {
@@ -26,28 +52,13 @@ export const QEAgentPlugin: Plugin = async ({ directory }) => {
             },
           },
         },
-        async execute(args) {
+        execute(args) {
           const repo = (args as { repo?: string }).repo ?? directory
-          const proc = Bun.spawnSync({
-            cmd: [
-              "npx",
-              "tsx",
-              "src/cli/main.ts",
-              "analyze",
-              "--repo",
-              repo,
-              "--json",
-            ],
-            cwd: directory,
-            stdout: "pipe",
-            stderr: "pipe",
-          })
-          const stdout = proc.stdout.toString()
-          const stderr = proc.stderr.toString()
-          if (proc.exitCode !== 0) {
-            return `QE analyze failed (exit ${proc.exitCode}):\n${stderr || stdout}`
-          }
-          return stdout
+          return runQeCli(
+            "analyze",
+            ["--repo", repo, "--json"],
+            directory,
+          )
         },
       },
       qe_verify: {
@@ -55,7 +66,7 @@ export const QEAgentPlugin: Plugin = async ({ directory }) => {
           "Run QE Agent verification against a requirements Markdown file. " +
           "Executes available validation commands, generates tests when " +
           "justified, and returns an evidence-backed QE verdict as JSON. " +
-          "Requires OPENAI_API_KEY. Only writes within the QE test/QE boundary.",
+          "Only writes within the QE test/QE boundary.",
         args: {
           type: "object",
           properties: {
@@ -76,35 +87,25 @@ export const QEAgentPlugin: Plugin = async ({ directory }) => {
           },
           required: ["requirements"],
         },
-        async execute(args) {
+        execute(args) {
           const a = args as {
             requirements: string
             repo?: string
             profile?: string
           }
-          const cmd = [
-            "npx",
-            "tsx",
-            "src/cli/main.ts",
+          return runQeCli(
             "verify",
-            "--requirements",
-            a.requirements,
-            "--json",
-          ]
-          if (a.repo) cmd.push("--repo", a.repo)
-          if (a.profile) cmd.push("--profile", a.profile)
-          const proc = Bun.spawnSync({
-            cmd,
-            cwd: directory,
-            stdout: "pipe",
-            stderr: "pipe",
-          })
-          const stdout = proc.stdout.toString()
-          const stderr = proc.stderr.toString()
-          if (proc.exitCode !== 0) {
-            return `QE verify failed (exit ${proc.exitCode}):\n${stderr || stdout}`
-          }
-          return stdout
+            [
+              "--requirements",
+              a.requirements,
+              "--json",
+              ...optionalFlags([
+                ["--repo", a.repo],
+                ["--profile", a.profile],
+              ]),
+            ],
+            directory,
+          )
         },
       },
       qe_review: {
@@ -112,7 +113,7 @@ export const QEAgentPlugin: Plugin = async ({ directory }) => {
           "Run QE Agent change review against a Git baseline. Collects the " +
           "diff, assesses risk, executes validation, and returns an " +
           "evidence-backed verdict with failure classifications as JSON. " +
-          "Requires OPENAI_API_KEY. Only writes within the QE test/QE boundary.",
+          "Only writes within the QE test/QE boundary.",
         args: {
           type: "object",
           properties: {
@@ -137,37 +138,27 @@ export const QEAgentPlugin: Plugin = async ({ directory }) => {
           },
           required: ["base"],
         },
-        async execute(args) {
+        execute(args) {
           const a = args as {
             base: string
             target?: string
             repo?: string
             profile?: string
           }
-          const cmd = [
-            "npx",
-            "tsx",
-            "src/cli/main.ts",
+          return runQeCli(
             "review",
-            "--base",
-            a.base,
-            "--json",
-          ]
-          if (a.target) cmd.push("--target", a.target)
-          if (a.repo) cmd.push("--repo", a.repo)
-          if (a.profile) cmd.push("--profile", a.profile)
-          const proc = Bun.spawnSync({
-            cmd,
-            cwd: directory,
-            stdout: "pipe",
-            stderr: "pipe",
-          })
-          const stdout = proc.stdout.toString()
-          const stderr = proc.stderr.toString()
-          if (proc.exitCode !== 0) {
-            return `QE review failed (exit ${proc.exitCode}):\n${stderr || stdout}`
-          }
-          return stdout
+            [
+              "--base",
+              a.base,
+              "--json",
+              ...optionalFlags([
+                ["--target", a.target],
+                ["--repo", a.repo],
+                ["--profile", a.profile],
+              ]),
+            ],
+            directory,
+          )
         },
       },
       qe_opencode_publish: {
@@ -189,31 +180,19 @@ export const QEAgentPlugin: Plugin = async ({ directory }) => {
           },
           required: ["result"],
         },
-        async execute(args) {
+        execute(args) {
           const a = args as { result: string; session?: string }
-          const cmd = [
-            "npx",
-            "tsx",
-            "src/cli/main.ts",
+          return runQeCli(
             "opencode",
-            "publish",
-            "--result",
-            a.result,
-            "--json",
-          ]
-          if (a.session) cmd.push("--session", a.session)
-          const proc = Bun.spawnSync({
-            cmd,
-            cwd: directory,
-            stdout: "pipe",
-            stderr: "pipe",
-          })
-          const stdout = proc.stdout.toString()
-          const stderr = proc.stderr.toString()
-          if (proc.exitCode !== 0) {
-            return `QE opencode publish failed (exit ${proc.exitCode}):\n${stderr || stdout}`
-          }
-          return stdout
+            [
+              "publish",
+              "--result",
+              a.result,
+              "--json",
+              ...optionalFlags([["--session", a.session]]),
+            ],
+            directory,
+          )
         },
       },
     },

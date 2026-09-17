@@ -46,6 +46,66 @@ function sanitizeSchemaName(role: string): string {
   return role.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
+/**
+ * Extract structured JSON from real-world model output.
+ *
+ * Reasoning and local models frequently wrap or decorate JSON even when
+ * asked not to. Supported formats, in order of preference:
+ *  1. bare JSON (the historical contract)
+ *  2. markdown code fences: ```json ... ``` or ``` ... ```
+ *  3. legacy reasoning blocks: <think>...</think> outside the JSON
+ *  4. JSON embedded in surrounding prose (first balanced object/array)
+ *
+ * This is tolerance in parsing only — schema validation still applies
+ * unchanged afterward, so invalid structured output can never silently
+ * enter the domain model.
+ */
+export function extractJsonContent(raw: string): string {
+  const text = raw.trim();
+  if (text.length === 0) return text;
+
+  // 1. Bare JSON.
+  if (text.startsWith("{") || text.startsWith("[")) return text;
+
+  // 2. Markdown code fences.
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fence?.[1]) return fence[1].trim();
+
+  // 3. Reasoning blocks before/after the JSON.
+  const stripped = text
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
+    .trim();
+  if (stripped.startsWith("{") || stripped.startsWith("[")) return stripped;
+
+  // 4. First balanced JSON object or array embedded in prose.
+  const start = text.search(/[{[]/);
+  if (start >= 0) {
+    const open = text[start];
+    const close = open === "{" ? "}" : "]";
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === open) depth++;
+      else if (ch === close) {
+        depth--;
+        if (depth === 0) return text.slice(start, i + 1);
+      }
+    }
+  }
+
+  return text;
+}
+
 export class OpenAIModelGateway implements ModelGateway {
   private readonly client: OpenAI;
   private readonly model: string;
@@ -214,7 +274,7 @@ export class OpenAIModelGateway implements ModelGateway {
 
     let parsed: unknown;
     try {
-      parsed = JSON.parse(content);
+      parsed = JSON.parse(extractJsonContent(content));
     } catch {
       throw new SchemaValidationError(
         content.slice(0, 4096),
