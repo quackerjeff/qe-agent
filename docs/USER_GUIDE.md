@@ -540,6 +540,16 @@ The repository ships a committed `.opencode/` directory for teams using the Open
 
 These files invoke the same CLI documented in this guide; they add no new QE behavior.
 
+#### OpenCode as a model provider
+
+For full harness separation, set `model.provider: opencode` in `.qe/config.yml`. QE's bounded reasoning calls then run through the real `opencode` CLI headless (`opencode run --format json`), using **OpenCode's own configured model and authentication** — no separate API endpoint or key. This mirrors the Kiro provider on the Kiro branch: each harness owns its own model layer.
+
+```yaml
+version: 1
+model:
+  provider: opencode
+```
+
 ## Browser Execution Without a Local Browser
 
 On servers without a Chromium binary installed, browser validation falls back to a Playwright MCP server (see [ADR-012](adr/012-playwright-mcp-browser-fallback.md)). Configure it in `.qe/config.yml`:
@@ -774,7 +784,7 @@ reasoning:
 | `tests.generation` | — | Whether QE Agent may generate tests |
 | `browser.enabled` | — | Browser testing: `auto`, `true`, `false` |
 | `ci.failOn` | — | Verdicts that cause non-zero exit in `--ci` mode |
-| `model.provider` | — | Model provider (currently: `openai`) |
+| `model.provider` | — | Model provider: `openai` (direct API), `opencode` (QE reasoning through the real `opencode` CLI headless — uses OpenCode's own configured model and auth) |
 | `model.model` | — | Model name (e.g., `gpt-4o`, `gpt-4o-mini`) |
 | `model.tpmLimit` | — | Tokens-per-minute throughput limit |
 | `reasoning.maxModelCalls` | — | Maximum model calls per run |
