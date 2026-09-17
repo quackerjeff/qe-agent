@@ -102,6 +102,9 @@ export const QEConfigSchema = z.object({
     .object({
       provider: z.string().default("openai"),
       model: z.string().default("gpt-4o"),
+      // OpenAI-compatible base URL (local llama.cpp/llama-swap, ollama,
+      // vLLM, ...). When unset, the provider SDK default is used.
+      baseUrl: z.string().url().optional(),
       tokenLimit: z.number().positive().optional(),
       tpmLimit: z.number().positive().optional(),
     })

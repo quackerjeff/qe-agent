@@ -19,7 +19,8 @@ export function createModelGateway(config: QEConfig): ModelGateway {
     case "default":
       return new OpenAIModelGateway({
         model,
-        apiKey: process.env.OPENAI_API_KEY,
+        apiKey: process.env.OPENAI_API_KEY ?? "local",
+        baseURL: config.model.baseUrl,
       });
     default:
       throw new Error(
