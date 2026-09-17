@@ -1,6 +1,7 @@
 import type { QEConfig } from "../config/index.js";
 import type { ModelGateway } from "../models/gateway/types.js";
 import { OpenAIModelGateway } from "../models/gateway/openai.js";
+import { KiroModelGateway } from "../models/gateway/kiro.js";
 
 const KNOWN_MODEL_TOKEN_LIMITS: Record<string, number> = {
   "gpt-4o": 128_000,
@@ -30,9 +31,17 @@ export function createModelGateway(config: QEConfig): ModelGateway {
         apiKey: process.env.OPENAI_API_KEY ?? "local",
         baseURL,
       });
+    case "kiro":
+      // Kiro-harness invocations: QE reasoning runs through the real
+      // kiro-cli (headless), using Kiro's own configured model and
+      // authentication. No endpoint or key configuration exists here —
+      // Kiro owns it.
+      return new KiroModelGateway({
+        executable: process.env.QE_KIRO_CLI ?? "kiro-cli",
+      });
     default:
       throw new Error(
-        `Unsupported model provider '${provider}'. Currently supported: openai`,
+        `Unsupported model provider '${provider}'. Currently supported: openai, kiro`,
       );
   }
 }

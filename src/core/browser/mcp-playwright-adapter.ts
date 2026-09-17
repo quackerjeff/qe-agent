@@ -13,6 +13,56 @@ import { evaluateUrlPolicy } from "./url-policy.js";
 import { redactSecrets } from "../../execution/secret-redactor.js";
 
 /**
+ * Extract the first JSON value embedded in tool output that wraps results
+ * in prose/code fences (e.g. `### Result\n"http://..."`). Handles objects,
+ * arrays, and bare quoted strings.
+ */
+function extractFirstJsonValue(text: string): unknown {
+  const candidates: string[] = [];
+
+  // Bare quoted string (JSON string value).
+  const strMatch = text.match(/"(?:[^"\\]|\\.)*"/);
+  if (strMatch) candidates.push(strMatch[0]);
+
+  // First balanced object or array.
+  const start = text.search(/[{[]/);
+  if (start >= 0) {
+    const open = text[start];
+    const close = open === "{" ? "}" : "]";
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === open) depth++;
+      else if (ch === close) {
+        depth--;
+        if (depth === 0) {
+          candidates.push(text.slice(start, i + 1));
+          break;
+        }
+      }
+    }
+  }
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // try next candidate
+    }
+  }
+  return undefined;
+}
+
+/**
  * BrowserCapability implementation backed by a Playwright MCP server
  * (e.g. `npx @playwright/mcp`) spoken to over stdio JSON-RPC.
  *
@@ -530,11 +580,20 @@ export class McpPlaywrightAdapter implements BrowserCapability {
     const text = await this.callTool("browser_evaluate", {
       function: "() => window.location.href",
     });
-    try {
-      const parsed = JSON.parse(text) as { result?: string };
-      if (typeof parsed?.result === "string") return parsed.result;
-    } catch {
-      // not JSON — fall through
+    // MCP evaluate returns a formatted block wrapping the JSON result
+    // (### Result fences + code blocks). Extract the first JSON value —
+    // an object, array, or bare quoted string — from the wrapper.
+    const extracted = extractFirstJsonValue(text);
+    if (extracted !== undefined) {
+      if (typeof extracted === "string") return extracted;
+      if (
+        extracted !== null &&
+        typeof extracted === "object" &&
+        "result" in extracted
+      ) {
+        const inner = (extracted as { result: unknown }).result;
+        return typeof inner === "string" ? inner : String(inner);
+      }
     }
     return text.trim();
   }
