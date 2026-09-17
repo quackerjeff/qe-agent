@@ -23,6 +23,7 @@ import { persistResult } from "../github/reporter.js";
 import { getCiExitCode } from "../github/verdict.js";
 import type { Verdict } from "../types/domain.js";
 import { writeSafeResultOutput } from "./output-path.js";
+import { createBrowserCapability } from "./browser-factory.js";
 
 export interface ReviewCommandOptions {
   base?: string;
@@ -177,6 +178,13 @@ export async function runReview(
     maxModelCalls: explicitMaxModelCalls,
     modelTokenLimit: resolveModelTokenLimit(config),
     tpmLimit: resolveModelTpmLimit(config),
+    browserCapability: createBrowserCapability(config),
+    browserConfig: {
+      enabled: config.browser.enabled,
+      baseUrl: config.browser.baseUrl,
+      allowedOrigins: config.browser.allowedOrigins,
+      headless: config.browser.headless,
+    },
     memoryConfig: {
       enabled: config.memory.enabled,
       historySummaries: config.memory.historySummaries,

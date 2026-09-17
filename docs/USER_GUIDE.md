@@ -523,6 +523,23 @@ The repository ships a committed `.opencode/` directory for teams using the Open
 
 These files invoke the same CLI documented in this guide; they add no new QE behavior.
 
+## Browser Execution Without a Local Browser
+
+On servers without a Chromium binary installed, browser validation falls back to a Playwright MCP server (see [ADR-012](adr/012-playwright-mcp-browser-fallback.md)). Configure it in `.qe/config.yml`:
+
+```yaml
+browser:
+  adapter: auto              # auto (default) | local | mcp
+  mcpCommand: npx             # optional override
+  mcpArgs: ["@playwright/mcp@latest", "--headless"]
+```
+
+- `auto` (default): tries local Chromium first; if the browser binary is missing (environment failure), the scenario is retried once through the Playwright MCP server.
+- `local`: local Chromium only — no fallback.
+- `mcp`: Playwright MCP server only — no local browser is launched.
+
+The MCP server is spawned only when browser validation actually runs, and is cleaned up after the run. URL policy, secret redaction, action validation, and budget enforcement apply identically under both adapters.
+
 ## Understanding QE Output
 
 ### Verdicts

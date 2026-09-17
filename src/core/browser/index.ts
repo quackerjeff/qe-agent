@@ -1,6 +1,11 @@
 export type { BrowserCapability } from "./capability.js";
 export { PlaywrightAdapter } from "./playwright-adapter.js";
 export {
+  McpPlaywrightAdapter,
+  type McpPlaywrightOptions,
+} from "./mcp-playwright-adapter.js";
+export { CompositeBrowserCapability } from "./composite.js";
+export {
   ManagedProcess,
   type ManagedProcessOptions,
   type ManagedProcessResult,

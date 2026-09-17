@@ -19,6 +19,7 @@ import type {
   ExecutionProfile,
 } from "../types/index.js";
 import { writeSafeResultOutput } from "./output-path.js";
+import { createBrowserCapability } from "./browser-factory.js";
 
 export interface VerifyCommandOptions {
   requirements?: string;
@@ -75,6 +76,13 @@ export async function runVerify(
     maxModelCalls: explicitMaxModelCalls,
     modelTokenLimit: resolveModelTokenLimit(config),
     tpmLimit: resolveModelTpmLimit(config),
+    browserCapability: createBrowserCapability(config),
+    browserConfig: {
+      enabled: config.browser.enabled,
+      baseUrl: config.browser.baseUrl,
+      allowedOrigins: config.browser.allowedOrigins,
+      headless: config.browser.headless,
+    },
     memoryConfig: {
       enabled: config.memory.enabled,
       historySummaries: config.memory.historySummaries,
