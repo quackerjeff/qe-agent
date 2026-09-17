@@ -10,7 +10,7 @@ The QE Agent is an autonomous software quality engineering system that evaluates
 
 The QE Agent can analyze repositories, execute validation commands through a controlled interface, and now perform bounded QE reasoning: change analysis, risk assessment, validation planning, evidence-based gap analysis, and verdict generation.
 
-An LLM provider (OpenAI) is required for reasoning capabilities. Set `OPENAI_API_KEY` in the environment.
+An LLM provider is required for reasoning capabilities. Configure access via environment variables or a git-ignored `.env` file (see `.env.example`) — keys, addresses, and model names are never committed.
 
 ## Prerequisites
 

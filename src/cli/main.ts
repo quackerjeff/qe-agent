@@ -13,6 +13,39 @@ import { runReview } from "./review.js";
 import { runGitHubPublish } from "./github-publish.js";
 import { runOpenCodePublish } from "./opencode-publish.js";
 
+/**
+ * Load a git-ignored .env file (KEY=VALUE lines) from the repository root
+ * so that addresses, keys, and model names never need to be committed
+ * (see AGENTS.md security rules). Existing environment variables always
+ * take precedence. No dependency — plain parsing of simple KEY=VALUE lines.
+ */
+async function loadLocalEnv(): Promise<void> {
+  const cwd = process.cwd();
+  const envPath = join(cwd, ".env");
+  try {
+    const text = await readFile(envPath, "utf-8");
+    for (const rawLine of text.split("\n")) {
+      const line = rawLine.trim();
+      if (line.length === 0 || line.startsWith("#")) continue;
+      const eq = line.indexOf("=");
+      if (eq <= 0) continue;
+      const key = line.slice(0, eq).trim();
+      let value = line.slice(eq + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (process.env[key] === undefined) {
+        process.env[key] = value;
+      }
+    }
+  } catch {
+    // No .env file — nothing to do
+  }
+}
+
 async function getVersion(): Promise<string> {
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
@@ -26,6 +59,7 @@ async function getVersion(): Promise<string> {
 }
 
 async function main(): Promise<void> {
+  await loadLocalEnv();
   const version = await getVersion();
   const program = new Command();
 

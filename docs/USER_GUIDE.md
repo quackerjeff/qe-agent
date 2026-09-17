@@ -85,18 +85,35 @@ npm run dev -- --profile quick
 
 ## API Credential Configuration
 
-QE Agent requires an OpenAI API key for commands that use LLM reasoning (`verify` and `review`). The `analyze` command does not require credentials.
+QE Agent requires model access for commands that use LLM reasoning (`verify` and `review`). The `analyze` command does not require credentials.
 
-Set the key as an environment variable:
+Secrets, addresses, and environment-specific model names are **never committed**. They are supplied via environment variables, optionally loaded from a git-ignored `.env` file in the repository root:
 
 ```bash
-export OPENAI_API_KEY="sk-..."
+cp .env.example .env   # then edit with your values
 ```
 
-Or pass it inline for a single command:
+The CLI loads `.env` automatically at startup (plain `KEY=VALUE` lines; real environment variables take precedence). Supported variables:
 
-```bash
-OPENAI_API_KEY="sk-..." node dist/cli/main.js verify --requirements reqs.md --repo /path/to/project
+| Variable | Purpose |
+|----------|---------|
+| `OPENAI_API_KEY` | Model provider API key |
+| `QE_MODEL_BASE_URL` | Overrides `model.baseUrl` — point at a local OpenAI-compatible endpoint (llama.cpp/llama-swap, ollama, vLLM) without committing addresses |
+| `QE_MODEL` | Overrides `model.model` — keep environment-specific model names out of `.qe/config.yml` |
+| `OPENCODE_SERVER_URL` | OpenCode server base URL for `opencode publish` |
+| `QE_OPENCODE_SESSION_ID` | Target session for result delivery |
+| `OPENCODE_SERVER_PASSWORD` | OpenCode server basic-auth password (redacted from all output) |
+| `GITHUB_TOKEN` | GitHub publishing token (redacted from all output) |
+
+Example local setup with no external API:
+
+```env
+# .env (git-ignored)
+QE_MODEL_BASE_URL=http://your-local-endpoint:port/v1
+QE_MODEL=your-local-model-name
+```
+
+With `QE_MODEL_BASE_URL` set, `.qe/config.yml` can keep the generic default model and no address; the environment variable wins. The gateway then talks to your local OpenAI-compatible server and no key is required.
 ```
 
 **Security warnings:**

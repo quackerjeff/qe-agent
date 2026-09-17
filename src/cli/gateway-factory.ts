@@ -12,7 +12,15 @@ const KNOWN_MODEL_TOKEN_LIMITS: Record<string, number> = {
 
 export function createModelGateway(config: QEConfig): ModelGateway {
   const provider = config.model.provider;
-  const model = config.model.model;
+
+  // Secrets and environment-specific values (endpoints, model names) may
+  // be supplied via environment variables so that committed .qe/config.yml
+  // files never contain addresses, keys, or local model names:
+  //   QE_MODEL_BASE_URL  — overrides model.baseUrl
+  //   QE_MODEL           — overrides model.model
+  //   OPENAI_API_KEY     — provider API key (already standard)
+  const baseURL = process.env.QE_MODEL_BASE_URL ?? config.model.baseUrl;
+  const model = process.env.QE_MODEL ?? config.model.model;
 
   switch (provider) {
     case "openai":
@@ -20,7 +28,7 @@ export function createModelGateway(config: QEConfig): ModelGateway {
       return new OpenAIModelGateway({
         model,
         apiKey: process.env.OPENAI_API_KEY ?? "local",
-        baseURL: config.model.baseUrl,
+        baseURL,
       });
     default:
       throw new Error(
@@ -33,7 +41,7 @@ export function resolveModelTokenLimit(config: QEConfig): number | undefined {
   if (config.model.tokenLimit) {
     return config.model.tokenLimit;
   }
-  return KNOWN_MODEL_TOKEN_LIMITS[config.model.model];
+  return KNOWN_MODEL_TOKEN_LIMITS[process.env.QE_MODEL ?? config.model.model];
 }
 
 export function resolveModelTpmLimit(config: QEConfig): number | undefined {
