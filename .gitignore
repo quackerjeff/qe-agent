@@ -118,3 +118,14 @@ Desktop.ini
 .vitest/
 .eslintcache
 .cache/
+
+
+# =============================================================================
+# Playwright MCP runtime artifacts
+#
+# The Playwright MCP server writes page-session snapshots to
+# .playwright-mcp/ in whatever directory it runs from. These are
+# runtime state, never source, and must not be committed.
+# =============================================================================
+
+.playwright-mcp/
