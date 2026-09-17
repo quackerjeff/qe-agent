@@ -9,9 +9,10 @@ import { discoverRoot } from "../src/repository/root-discovery.js";
 const execFileAsync = promisify(execFile);
 
 /**
- * Regression tests for root discovery source semantics (live-tested
- * against a real Python project checked out under $HOME, where a stray
- * parent-directory package.json previously hijacked the analysis root).
+ * Regression tests for root discovery source semantics. Originally
+ * motivated by a live test where a Python project checked out under
+ * $HOME was hijacked by a stray parent-directory package.json; the
+ * fixtures here reproduce that shape generically.
  */
 
 describe("discoverRoot path source", () => {
@@ -23,7 +24,7 @@ describe("discoverRoot path source", () => {
     // Simulate $HOME containing a stray project marker.
     await writeFile(join(parentDir, "package.json"), "{}", "utf-8");
     // A real Python-style repo below it with only requirements.txt.
-    repoDir = join(parentDir, "llama-rpc-farm");
+    repoDir = join(parentDir, "sample-python-repo");
     await mkdir(repoDir, { recursive: true });
     await writeFile(join(repoDir, "requirements.txt"), "fastapi\n", "utf-8");
     await writeFile(join(repoDir, "pytest.ini"), "[pytest]\n", "utf-8");
