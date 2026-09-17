@@ -3,3 +3,7 @@ runs/
 cache/
 artifacts/
 traces/
+
+# Run history is runtime state from QE executions on this repo —
+# not durable project knowledge. Regenerated per run.
+history/
