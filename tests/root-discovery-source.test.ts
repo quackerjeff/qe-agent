@@ -10,9 +10,9 @@ const execFileAsync = promisify(execFile);
 
 /**
  * Regression tests for root discovery source semantics. Originally
- * motivated by a live test where a Python project checked out under $HOME
- * was hijacked by a stray parent-directory package.json; the fixtures
- * here reproduce that shape generically.
+ * motivated by a live test where a Python project checked out under
+ * $HOME was hijacked by a stray parent-directory package.json; the
+ * fixtures here reproduce that shape generically.
  */
 
 describe("discoverRoot path source", () => {
@@ -23,7 +23,7 @@ describe("discoverRoot path source", () => {
     parentDir = await mkdtemp(join(tmpdir(), "qe-root-"));
     // Simulate $HOME containing a stray project marker.
     await writeFile(join(parentDir, "package.json"), "{}", "utf-8");
-    // A Python-style repo below it with only requirements.txt.
+    // A real Python-style repo below it with only requirements.txt.
     repoDir = join(parentDir, "sample-python-repo");
     await mkdir(repoDir, { recursive: true });
     await writeFile(join(repoDir, "requirements.txt"), "fastapi\n", "utf-8");

@@ -38,7 +38,9 @@ describe("buildKiroReasoningPrompt", () => {
     expect(prompt).toContain("JSON only");
     expect(prompt).toContain("## Objective\nAssess risk.");
     expect(prompt).toContain('## Context\n{"repo":"python"}');
-    expect(prompt).toContain('## Output schema (JSON Schema)\n{"type":"object"}');
+    expect(prompt).toContain(
+      '## Output schema (JSON Schema)\n{"type":"object"}',
+    );
     expect(prompt).toContain("- Cite evidence.");
   });
 
@@ -53,9 +55,11 @@ describe("buildKiroReasoningPrompt", () => {
 describe("KiroModelGateway stream extraction (real event shapes)", () => {
   it("prefers runFinished finalText over message chunks", async () => {
     const gw = new KiroModelGateway();
-    const extracted = (gw as unknown as {
-      extractStreamText(raw: string): string;
-    }).extractStreamText(REAL_STREAM_OUTPUT);
+    const extracted = (
+      gw as unknown as {
+        extractStreamText(raw: string): string;
+      }
+    ).extractStreamText(REAL_STREAM_OUTPUT);
     expect(JSON.parse(extracted)).toEqual({ level: "HIGH" });
   });
 
@@ -65,10 +69,11 @@ describe("KiroModelGateway stream extraction (real event shapes)", () => {
       '{"type":"sessionUpdate","data":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":":true}"}}}}',
     ].join("\n");
     const gw = new KiroModelGateway();
-    const extracted = (gw as unknown as {
-      extractStreamText(raw: string): string;
-    }).extractStreamText(streamWithoutFinish);
+    const extracted = (
+      gw as unknown as {
+        extractStreamText(raw: string): string;
+      }
+    ).extractStreamText(streamWithoutFinish);
     expect(JSON.parse(extracted)).toEqual({ ok: true });
   });
-
 });

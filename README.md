@@ -6,17 +6,17 @@ The QE Agent is an autonomous software quality engineering system that evaluates
 
 ## Status
 
-**MVP — Milestone 3 (QE Reasoning)**
+**MVP — post-Milestone 7 (GitHub integration, project memory, browser QE, test generation)**
 
-The QE Agent can analyze repositories, execute validation commands through a controlled interface, and now perform bounded QE reasoning: change analysis, risk assessment, validation planning, evidence-based gap analysis, and verdict generation.
+The QE Agent analyzes repositories, executes validation commands through a controlled interface, performs bounded QE reasoning (change analysis, risk assessment, validation planning, evidence-based gap analysis, verdict generation), generates tests when justified, runs browser validation with automatic fallback, persists project memory, and publishes results to GitHub or OpenCode.
 
-An LLM provider is required for reasoning capabilities. Configure access via environment variables or a git-ignored `.env` file (see `.env.example`) — keys, addresses, and model names are never committed.
+Model access is required for reasoning capabilities. Configure via environment variables or a git-ignored `.env` file (see `.env.example`) — keys, addresses, and model names are never committed.
 
 ## Prerequisites
 
 - Node.js >= 20.0.0
 - npm
-- `OPENAI_API_KEY` environment variable (for QE reasoning)
+- Model access for QE reasoning: a provider API key in the environment (e.g. `OPENAI_API_KEY`), a local OpenAI-compatible endpoint, or a configured harness CLI (`opencode`) — see Model Configuration below
 
 ## Installation
 
@@ -237,13 +237,19 @@ Configure the model provider in `.qe/config.yml`:
 ```yaml
 version: 1
 model:
-  provider: openai
-  model: gpt-4o
+  provider: openai   # or: kiro / opencode (route reasoning through that harness CLI)
+  model: gpt-4o      # ignored for harness providers — the harness owns the model
 reasoning:
   maxModelCalls: 12
 ```
 
-API keys come from the environment (`OPENAI_API_KEY`), never from config files.
+| Provider | QE reasoning runs through | Credentials |
+|----------|---------------------------|-------------|
+| `openai` | Direct OpenAI-compatible API (local endpoints via `QE_MODEL_BASE_URL`/`QE_MODEL` env) | `OPENAI_API_KEY` env |
+| `opencode` | The real `opencode` CLI, headless — OpenCode's own configured model | OpenCode's own auth (none here) |
+| `kiro` | The real `kiro-cli`, headless — Kiro's own configured model | Kiro's own auth (none here) |
+
+API keys and addresses come from the environment, never from config files. Harness providers need no keys at all — the harness CLI owns its model and authentication.
 
 After building (`npm run build`), the CLI is also available as:
 
@@ -260,8 +266,10 @@ QE Agent can validate any software repository, not just itself. Build once, then
 # Build QE Agent
 npm install && npm run build
 
-# Set your API key
-export OPENAI_API_KEY="sk-..."
+# Configure model access (any of):
+#   - export OPENAI_API_KEY="sk-..."          (openai provider)
+#   - point QE_MODEL_BASE_URL/QE_MODEL at a local endpoint (see .env.example)
+#   - set model.provider: opencode to use the opencode CLI's own model
 
 # Analyze your project (no API key needed)
 node dist/cli/main.js analyze --repo /path/to/your-project

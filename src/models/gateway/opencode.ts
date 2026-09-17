@@ -6,26 +6,27 @@ import { zodToJsonSchema } from "./schema-converter.js";
 import { extractJsonContent } from "./openai.js";
 
 /**
- * Kiro-backed Model Gateway (ADR-003 provider abstraction, ADR-013).
+ * OpenCode-backed Model Gateway (ADR-003 provider abstraction, ADR-011).
  *
- * Routes each bounded QE reasoning call through the real Kiro CLI in
- * headless mode (`kiro-cli chat --no-interactive --trust-all-tools`),
- * so when Kiro is the invocation harness, QE reasoning uses Kiro's own
- * configured model and authentication — not a separate provider
- * endpoint. The Kiro agent is instructed to answer with structured JSON
- * only; parsing tolerance (extractJsonContent) plus unchanged schema
- * validation keep invalid output out of the domain model.
+ * Routes each bounded QE reasoning call through the real OpenCode CLI in
+ * headless mode (`opencode run --format json`), so when OpenCode is the
+ * invocation harness, QE reasoning uses OpenCode's own configured model
+ * and authentication (its providers/models config) — not a separate
+ * provider endpoint. The same JSON-only instruction set and parsing
+ * tolerance (extractJsonContent) plus unchanged schema validation keep
+ * invalid output out of the domain model. Symmetric with the Kiro
+ * provider gateway.
  */
 
-export interface KiroProviderConfig {
-  /** Kiro CLI executable (default: kiro-cli, resolved from PATH). */
+export interface OpenCodeProviderConfig {
+  /** OpenCode CLI executable (default: opencode, resolved from PATH). */
   executable?: string;
   /** Per-call timeout in milliseconds (default: 120s). */
   timeoutMs?: number;
 }
 
 /** Build the headless prompt for one structured reasoning call. */
-export function buildKiroReasoningPrompt(
+export function buildOpenCodeReasoningPrompt(
   objective: string,
   contextJson: string,
   schemaJson: string,
@@ -49,7 +50,7 @@ export function buildKiroReasoningPrompt(
     .join("\n");
 }
 
-export class KiroModelGateway implements ModelGateway {
+export class OpenCodeModelGateway implements ModelGateway {
   private readonly executable: string;
   private readonly timeoutMs: number;
   public readonly callLog: {
@@ -59,8 +60,8 @@ export class KiroModelGateway implements ModelGateway {
     error?: string;
   }[] = [];
 
-  constructor(config: KiroProviderConfig = {}) {
-    this.executable = config.executable ?? "kiro-cli";
+  constructor(config: OpenCodeProviderConfig = {}) {
+    this.executable = config.executable ?? "opencode";
     this.timeoutMs = config.timeoutMs ?? 120_000;
   }
 
@@ -69,7 +70,7 @@ export class KiroModelGateway implements ModelGateway {
     const start = Date.now();
 
     const schema = zodToJsonSchema(task.outputSchema);
-    const prompt = buildKiroReasoningPrompt(
+    const prompt = buildOpenCodeReasoningPrompt(
       task.objective,
       JSON.stringify(task.context),
       JSON.stringify(schema),
@@ -91,7 +92,7 @@ export class KiroModelGateway implements ModelGateway {
       });
       throw new SchemaValidationError(
         stdout.slice(0, 4096),
-        `Kiro model returned malformed JSON for role "${task.role}"`,
+        `OpenCode model returned malformed JSON for role "${task.role}"`,
       );
     }
 
@@ -119,14 +120,14 @@ export class KiroModelGateway implements ModelGateway {
     return {
       data: validated,
       usage: {
-        // Token usage is not reported by headless kiro-cli output;
-        // zeros are honest (no fabricated usage numbers).
+        // Headless opencode run events do not expose a stable usage
+        // payload; zeros are honest (no fabricated usage numbers).
         promptTokens: 0,
         completionTokens: 0,
         totalTokens: 0,
       },
-      model: "kiro",
-      provider: "kiro",
+      model: "opencode",
+      provider: "opencode",
       durationMs,
       startedAt,
       retryCount: 0,
@@ -136,18 +137,10 @@ export class KiroModelGateway implements ModelGateway {
 
   private runHeadless(prompt: string, role: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      const proc = spawn(
-        this.executable,
-        [
-          "chat",
-          "--no-interactive",
-          "--trust-all-tools",
-          "--output-format",
-          "stream-json",
-          prompt,
-        ],
-        { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } },
-      );
+      const proc = spawn(this.executable, ["run", "--format", "json", prompt], {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env },
+      });
 
       const stdoutChunks: Buffer[] = [];
       const stderrChunks: Buffer[] = [];
@@ -166,7 +159,7 @@ export class KiroModelGateway implements ModelGateway {
         reject(
           new SchemaValidationError(
             "",
-            `Kiro CLI spawn failed for role "${role}": ${err.message}`,
+            `OpenCode CLI spawn failed for role "${role}": ${err.message}`,
           ),
         );
       });
@@ -181,65 +174,68 @@ export class KiroModelGateway implements ModelGateway {
           reject(
             new SchemaValidationError(
               "",
-              `Kiro CLI exited with code ${code} for role "${role}": ${Buffer.concat(stderrChunks).toString("utf-8").slice(0, 500)}`,
+              `OpenCode CLI exited with code ${code} for role "${role}": ${Buffer.concat(stderrChunks).toString("utf-8").slice(0, 500)}`,
             ),
           );
           return;
         }
         resolve(
-          this.extractStreamText(Buffer.concat(stdoutChunks).toString("utf-8")),
+          this.extractRunText(Buffer.concat(stdoutChunks).toString("utf-8")),
         );
       });
     });
   }
 
   /**
-   * stream-json output is JSON Lines of ACP events. The authoritative
-   * answer is runFinished.data.finalText; agent_message_chunk events
-   * are the fallback when the run was cut off before finishing.
+   * `opencode run --format json` emits JSON Lines of raw events. The
+   * authoritative answer text is extracted from assistant message parts
+   * across update/message events.
    */
-  private extractStreamText(raw: string): string {
-    let finalText: string | undefined;
-    const chunks: string[] = [];
-
+  private extractRunText(raw: string): string {
+    const texts: string[] = [];
     for (const line of raw.split("\n")) {
       const trimmed = line.trim();
       if (trimmed.length === 0) continue;
       try {
         const event = JSON.parse(trimmed) as {
           type?: string;
+          part?: { type?: string; text?: string };
+          info?: { part?: { type?: string; text?: string } };
+          message?: {
+            role?: string;
+            content?: { type?: string; text?: string }[];
+          };
           data?: {
-            finalText?: string;
-            status?: string;
-            update?: {
-              sessionUpdate?: string;
-              content?: { type?: string; text?: string };
+            part?: { type?: string; text?: string };
+            message?: {
+              role?: string;
+              content?: { type?: string; text?: string }[];
             };
           };
         };
-        if (
-          event.type === "runFinished" &&
-          typeof event.data?.finalText === "string"
-        ) {
-          finalText = event.data.finalText;
+
+        // Common shapes across opencode versions: top-level part, or
+        // part/info nested under data. Collect assistant text parts.
+        const partSources = [event.part, event.info?.part, event.data?.part];
+        for (const part of partSources) {
+          if (part?.type === "text" && typeof part.text === "string") {
+            texts.push(part.text);
+          }
         }
-        const update = event.data?.update;
-        if (
-          event.type === "sessionUpdate" &&
-          update?.sessionUpdate === "agent_message_chunk" &&
-          update.content?.type === "text" &&
-          typeof update.content.text === "string"
-        ) {
-          chunks.push(update.content.text);
+        for (const msg of [event.message, event.data?.message]) {
+          if (msg?.role === "assistant") {
+            for (const part of msg.content ?? []) {
+              if (part.type === "text" && typeof part.text === "string") {
+                texts.push(part.text);
+              }
+            }
+          }
         }
       } catch {
-        // not a JSON line (banner etc.) — skip
+        // not a JSON line — skip
       }
     }
-
-    if (finalText !== undefined && finalText.length > 0) return finalText;
-    const joined = chunks.join("").trim();
-    if (joined.length > 0) return joined;
-    return raw.trim();
+    const joined = texts.join("").trim();
+    return joined.length > 0 ? joined : raw.trim();
   }
 }
