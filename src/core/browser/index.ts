@@ -7,7 +7,6 @@ export {
 export {
   validateMcpInvocation,
   launchControlledMcp,
-  killMcpProcessTree,
   PINNED_PLAYWRIGHT_MCP_VERSION,
   PINNED_MCP_PACKAGE,
 } from "./mcp-launcher.js";

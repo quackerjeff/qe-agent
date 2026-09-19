@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createExecutionId } from "../logging/index.js";
 import { redactSecrets, redactArgs } from "./secret-redactor.js";
+import { buildSafeEnvironment } from "./safe-env.js";
 import { BoundedBuffer } from "./bounded-buffer.js";
 import type {
   Executor,
@@ -10,56 +11,10 @@ import type {
   ExecutorType,
 } from "./types.js";
 
-const SAFE_ENV_VARS = new Set([
-  "PATH",
-  "HOME",
-  "USER",
-  "LOGNAME",
-  "SHELL",
-  "TERM",
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "TMPDIR",
-  "TMP",
-  "TEMP",
-  "HOSTNAME",
-  "EDITOR",
-  "VISUAL",
-  "PAGER",
-  "SYSTEMROOT",
-  "COMSPEC",
-  "WINDIR",
-  "PROGRAMFILES",
-  "APPDATA",
-  "LOCALAPPDATA",
-  "HOMEDRIVE",
-  "HOMEPATH",
-  "USERPROFILE",
-  "XDG_RUNTIME_DIR",
-  "XDG_DATA_HOME",
-  "XDG_CONFIG_HOME",
-  "XDG_CACHE_HOME",
-]);
-
 function buildEnvironment(
   proposal: CommandProposal,
 ): Record<string, string | undefined> {
-  const env: Record<string, string | undefined> = {};
-
-  for (const key of SAFE_ENV_VARS) {
-    if (process.env[key] !== undefined) {
-      env[key] = process.env[key];
-    }
-  }
-
-  if (proposal.environment) {
-    for (const [key, val] of Object.entries(proposal.environment)) {
-      env[key] = val;
-    }
-  }
-
-  return env;
+  return buildSafeEnvironment(proposal);
 }
 
 function buildSafeCommand(

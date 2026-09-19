@@ -179,7 +179,7 @@ export async function runReview(
     minResponseTokens: config.reasoning.maxOutputTokens,
     modelTokenLimit: resolveModelTokenLimit(config),
     tpmLimit: resolveModelTpmLimit(config),
-    browserCapability: createBrowserCapability(config),
+    browserCapability: await createBrowserCapability(config),
     browserConfig: {
       enabled: config.browser.enabled,
       baseUrl: config.browser.baseUrl,

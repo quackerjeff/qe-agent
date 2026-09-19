@@ -123,11 +123,13 @@ class FakeCapability implements BrowserCapability {
   async cleanup(): Promise<void> {}
 }
 
-function makeContext(): BrowserExecutionContext {
+function makeContext(
+  repositoryRoot = "/tmp/fake-repo",
+): BrowserExecutionContext {
   return {
     baseUrl: "http://localhost:3210",
     allowedOrigins: ["http://localhost:3210"],
-    repositoryRoot: "/tmp/fake-repo",
+    repositoryRoot,
     artifactDir: ".qe/runs/test",
     budget: {
       maxBrowserScenarios: 5,
@@ -159,6 +161,7 @@ function makeScenario(): BrowserScenario {
 
 describe("McpPlaywrightAdapter", () => {
   let tmpDir: string | undefined;
+  let repoRoot: string | undefined;
   let adapter: McpPlaywrightAdapter | undefined;
 
   afterEach(async () => {
@@ -167,8 +170,15 @@ describe("McpPlaywrightAdapter", () => {
     if (tmpDir) {
       await rm(tmpDir, { recursive: true, force: true });
       tmpDir = undefined;
+      repoRoot = undefined;
     }
   });
+
+  /** Context confined to a real temp repository (command policy requires it). */
+  function ctx(): BrowserExecutionContext {
+    if (!repoRoot) throw new Error("repoRoot not initialized");
+    return makeContext(repoRoot);
+  }
 
   async function makeServerAdapter(): Promise<McpPlaywrightAdapter> {
     tmpDir = await mkdtemp(join(tmpdir(), "qe-mcp-"));
@@ -178,6 +188,11 @@ describe("McpPlaywrightAdapter", () => {
     await mkdir(serverDir, { recursive: true });
     const serverPath = join(serverDir, "cli.js");
     await writeFile(serverPath, FAKE_MCP_SERVER, "utf-8");
+    // Command policy confines execution inside a real repository root;
+    // canonicalize it so symlinked tmpdirs compare equal everywhere.
+    const { realpath } = await import("node:fs/promises");
+    await mkdir(join(tmpDir, "repo"), { recursive: true });
+    repoRoot = await realpath(join(tmpDir, "repo"));
     adapter = new McpPlaywrightAdapter({
       command: process.execPath,
       args: [serverPath],
@@ -206,7 +221,7 @@ describe("McpPlaywrightAdapter", () => {
 
   it("executes a scenario through the MCP server", async () => {
     const a = await makeServerAdapter();
-    const result = await a.executeScenario(makeScenario(), makeContext());
+    const result = await a.executeScenario(makeScenario(), ctx());
     expect(result.scenarioId).toBe("scenario-1");
     expect(result.status).toBe("PASS");
     expect(result.actionResults).toHaveLength(2);
@@ -221,7 +236,7 @@ describe("McpPlaywrightAdapter", () => {
         type: "NAVIGATE",
         url: "http://evil.example.com/page",
       },
-      makeContext(),
+      ctx(),
     );
     expect(result.status).toBe("POLICY_DENIED");
     expect(result.error).toContain("denied origin");
@@ -236,7 +251,7 @@ describe("McpPlaywrightAdapter", () => {
         value: "sk-secret1234",
       },
       {
-        ...makeContext(),
+        ...ctx(),
         secrets: ["sk-secret1234"],
       },
     );
@@ -255,7 +270,7 @@ describe("McpPlaywrightAdapter", () => {
       })),
     };
     const result = await a.executeScenario(scenario, {
-      ...makeContext(),
+      ...ctx(),
       budget: {
         maxBrowserScenarios: 5,
         maxBrowserActions: 2,
@@ -278,7 +293,7 @@ describe("McpPlaywrightAdapter", () => {
     await a.available();
     // Kill the underlying server by cleaning up then executing
     await a.cleanup();
-    const result = await a.executeScenario(makeScenario(), makeContext());
+    const result = await a.executeScenario(makeScenario(), ctx());
     // A new server is spawned automatically, so this should still work
     expect(result.status).toBe("PASS");
   });
@@ -351,6 +366,9 @@ describe("CompositeBrowserCapability", () => {
 
   it("composite with real PlaywrightAdapter falls back when local browser is missing", async () => {
     // On a server without Chromium this exercises the real fallback path.
+    // chromium.launch() probes the host for a browser binary, which is
+    // slow under full-suite load — allow a generous budget so this test
+    // is deterministic regardless of suite ordering/parallelism.
     const composite = new CompositeBrowserCapability(
       new PlaywrightAdapter(),
       new FakeCapability("pass"),
@@ -362,5 +380,5 @@ describe("CompositeBrowserCapability", () => {
     // Either local Chromium worked (PASS) or the fallback ran (PASS).
     expect(result.status).toBe("PASS");
     await composite.cleanup();
-  });
+  }, 60_000);
 });

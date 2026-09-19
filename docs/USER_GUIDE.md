@@ -115,8 +115,6 @@ QE_MODEL=your-local-model-name
 
 With `QE_MODEL_BASE_URL` set, `.qe/config.yml` can keep the generic default model and no address; the environment variable wins. The gateway then talks to your local OpenAI-compatible server and no key is required.
 
-```
-
 **Security warnings:**
 
 - Never commit API keys to version control
@@ -130,19 +128,17 @@ With `QE_MODEL_BASE_URL` set, `.qe/config.yml` can keep the generic default mode
 QE Agent can live in a separate directory from the project it validates. A typical layout:
 
 ```
-
 ~/Development/
-qe-agent/ # QE Agent source (built once)
-my-application/ # Target repository to validate
-
-````
+  qe-agent/            # QE Agent source (built once)
+  my-application/      # Target repository to validate
+```
 
 Use `--repo` to point QE Agent at the target repository:
 
 ```bash
 node ~/Development/qe-agent/dist/cli/main.js analyze \
   --repo ~/Development/my-application
-````
+```
 
 When `--repo` is omitted, QE Agent uses the current working directory as the target repository. You can also `cd` into your project and run QE from there:
 
@@ -576,11 +572,14 @@ browser:
 > are accepted by the schema for backwards compatibility but are
 > **ignored at runtime** — repository configuration must not select
 > executables. The MCP server is operator-provisioned and launched
-> through the controlled-execution boundary (executable/implementation
-> allowlists, filtered environment, bounded output, process-group
-> cleanup); the default is a pinned `npx @playwright/mcp@<version>
---headless` (explicit release, never `@latest` — downloads from the
-> npm registry on first use, so it needs network access at startup).
+> through the Execution Controller's managed-process capability
+> (command policy, filtered environment, bounded output, evidence,
+> process-group cleanup). Resolution order: `QE_PLAYWRIGHT_MCP_CLI`
+> override, npx-cache discovery, then the pinned
+> `npx @playwright/mcp@<version> --headless` default (explicit release,
+> never `@latest`; downloads from the npm registry on first use, so it
+> needs network access at startup — prefer a locally provisioned copy
+> on offline hosts).
 
 The MCP server is spawned only when browser validation actually runs, and is cleaned up after the run. URL policy (checked after every state-changing action and before every read/capture), secret redaction, action validation, screenshot confinement to the QE artifact directory, and budget enforcement apply identically under both adapters.
 

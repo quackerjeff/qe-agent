@@ -13,11 +13,11 @@ import type {
 import { executeScenarioActions } from "./scenario-executor.js";
 import { evaluateUrlPolicy } from "./url-policy.js";
 import { redactSecrets } from "../../execution/secret-redactor.js";
+import { launchControlledMcp, validateMcpInvocation } from "./mcp-launcher.js";
 import {
-  launchControlledMcp,
-  killMcpProcessTree,
-  validateMcpInvocation,
-} from "./mcp-launcher.js";
+  ExecutionController,
+  type ManagedProcessHandle,
+} from "../../execution/index.js";
 
 /**
  * Extract the first JSON value embedded in tool output that wraps results
@@ -91,6 +91,12 @@ export interface McpPlaywrightOptions {
   startupTimeoutMs?: number;
   /** Per-tool-call timeout (ms). */
   callTimeoutMs?: number;
+  /**
+   * Canonical Execution Controller the server is spawned through.
+   * Defaults to a dedicated controller instance; every spawn flows
+   * through `ExecutionController.spawnManaged` either way.
+   */
+  controller?: ExecutionController;
 }
 
 interface JsonRpcRequest {
@@ -110,6 +116,7 @@ interface JsonRpcResponse {
 
 export class McpPlaywrightAdapter implements BrowserCapability {
   private process: ChildProcess | null = null;
+  private handle: ManagedProcessHandle | null = null;
   private nextId = 1;
   private pending = new Map<
     number,
@@ -121,6 +128,7 @@ export class McpPlaywrightAdapter implements BrowserCapability {
   >();
   private buffer = "";
   private readonly options: McpPlaywrightOptions;
+  private readonly controller: ExecutionController;
   private screenshotCount = 0;
 
   constructor(options: McpPlaywrightOptions) {
@@ -128,6 +136,7 @@ export class McpPlaywrightAdapter implements BrowserCapability {
     // at construction time so no unapproved executable can be spawned.
     validateMcpInvocation(options.command, options.args);
     this.options = options;
+    this.controller = options.controller ?? new ExecutionController();
   }
 
   /**
@@ -202,7 +211,7 @@ export class McpPlaywrightAdapter implements BrowserCapability {
     scenario: BrowserScenario,
     context: BrowserExecutionContext,
   ): Promise<BrowserScenarioResult> {
-    await this.ensureServer();
+    await this.ensureServer(context);
     return executeScenarioActions(scenario, context, (action) =>
       this.executeAction(action, context),
     );
@@ -216,7 +225,7 @@ export class McpPlaywrightAdapter implements BrowserCapability {
     const elapsed = () => Date.now() - startTime;
 
     try {
-      await this.ensureServer();
+      await this.ensureServer(context);
 
       switch (action.type) {
         case "NAVIGATE":
@@ -290,7 +299,28 @@ export class McpPlaywrightAdapter implements BrowserCapability {
         }
 
         case "ASSERT_URL": {
-          const currentUrl = await this.currentUrl();
+          let currentUrl: string;
+          try {
+            currentUrl = await this.currentUrl();
+          } catch {
+            return {
+              action,
+              status: "FAIL",
+              durationMs: elapsed(),
+              error: "Could not establish current origin before URL assertion",
+              failureClassification: "ENVIRONMENT_ISSUE",
+            };
+          }
+          const policy = evaluateUrlPolicy(currentUrl, context.allowedOrigins);
+          if (!policy.allowed) {
+            return {
+              action,
+              status: "POLICY_DENIED",
+              durationMs: elapsed(),
+              url: currentUrl,
+              error: `Current origin denied before read: ${currentUrl}`,
+            };
+          }
           const expected = action.url ?? action.value ?? "";
           const pass = currentUrl.includes(expected);
           return {
@@ -377,17 +407,19 @@ export class McpPlaywrightAdapter implements BrowserCapability {
 
     if (!this.process) return;
     const proc = this.process;
+    const handle = this.handle;
     this.process = null;
+    this.handle = null;
 
     try {
       proc.stdin?.end();
     } catch {
       // best-effort
     }
-    // Process-tree cleanup via the controlled launcher (process group).
+    // Process-tree cleanup through the controller-owned handle.
     await Promise.race([
       (async () => {
-        await killMcpProcessTree(proc);
+        await handle?.killTree();
       })(),
       new Promise<void>((resolve) => setTimeout(() => resolve(), 4_000)),
     ]);
@@ -446,7 +478,9 @@ export class McpPlaywrightAdapter implements BrowserCapability {
   /**
    * Verify the current origin before reading or capturing browser state.
    * Returns a POLICY_DENIED result when the page has left the allowed
-   * origins, or null when it is safe to proceed.
+   * origins — or when the current URL cannot be established at all
+   * (fail closed: an unknown origin is never treated as allowed) —
+   * or null when it is safe to proceed.
    */
   private async verifyCurrentUrlPolicy(
     action: BrowserAction,
@@ -457,7 +491,13 @@ export class McpPlaywrightAdapter implements BrowserCapability {
     try {
       currentUrl = await this.currentUrl();
     } catch {
-      return null;
+      return {
+        action,
+        status: "POLICY_DENIED",
+        durationMs: Date.now() - startTime,
+        error:
+          "Could not establish current origin before read — denying capture",
+      };
     }
     const policy = evaluateUrlPolicy(currentUrl, context.allowedOrigins);
     if (!policy.allowed) {
@@ -600,16 +640,26 @@ export class McpPlaywrightAdapter implements BrowserCapability {
 
   // --- JSON-RPC plumbing ---
 
-  private async ensureServer(): Promise<void> {
+  private async ensureServer(context?: BrowserExecutionContext): Promise<void> {
     if (this.process && !this.process.killed) return;
 
-    // Controlled-execution boundary: validated, env-filtered,
-    // detached (process-group) spawn with bounded output capture.
-    const { proc } = launchControlledMcp({
+    // Canonical execution boundary: the MCP server is spawned through
+    // the Execution Controller's managed-process capability (policy,
+    // filtered environment, bounded output, evidence, process-group
+    // lifecycle). The repository root confines command policy; without
+    // a browser context the server's own directory is the root.
+    const repositoryRoot =
+      context?.repositoryRoot ?? this.options.cwd ?? process.cwd();
+    const handle = await launchControlledMcp({
       command: this.options.command,
       args: this.options.args,
       cwd: this.options.cwd,
+      controller: this.controller,
+      repositoryRoot,
+      secrets: context?.secrets,
+      startupTimeoutMs: this.options.startupTimeoutMs,
     });
+    const proc = handle.proc;
 
     proc.on("error", (err) => {
       this.failAllPending(err);
@@ -623,6 +673,7 @@ export class McpPlaywrightAdapter implements BrowserCapability {
       this.failAllPending(new Error("MCP server exited unexpectedly"));
     });
 
+    this.handle = handle;
     this.process = proc;
     this.buffer = "";
 

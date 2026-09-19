@@ -1,5 +1,12 @@
 export { ExecutionController } from "./controller.js";
 export type { ExecutionControllerOptions } from "./controller.js";
+export {
+  spawnManagedProcess,
+  killProcessTree,
+  ManagedProcessDeniedError,
+} from "./managed-process.js";
+export type { ManagedProcessHandle } from "./managed-process.js";
+export { buildSafeEnvironment } from "./safe-env.js";
 export { LocalExecutor } from "./local-executor.js";
 export { DockerExecutor, computeContainerWorkdir } from "./docker-executor.js";
 export { BoundedBuffer } from "./bounded-buffer.js";

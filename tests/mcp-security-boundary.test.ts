@@ -1,5 +1,7 @@
-import { describe, it, expect } from "vitest";
-import { resolve } from "node:path";
+import { describe, it, expect, afterEach } from "vitest";
+import { resolve, join } from "node:path";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { McpPlaywrightAdapter } from "../src/core/browser/mcp-playwright-adapter.js";
 import {
   validateMcpInvocation,
@@ -7,11 +9,13 @@ import {
 } from "../src/core/browser/mcp-launcher.js";
 import type { BrowserExecutionContext } from "../src/core/browser/types.js";
 
-function makeContext(): BrowserExecutionContext {
+function makeContext(
+  repositoryRoot = "/tmp/fake-repo",
+): BrowserExecutionContext {
   return {
     baseUrl: "http://localhost:3210",
     allowedOrigins: ["http://localhost:3210"],
-    repositoryRoot: "/tmp/fake-repo",
+    repositoryRoot,
     artifactDir: ".qe/runs/test",
     budget: {
       maxBrowserScenarios: 5,
@@ -102,5 +106,114 @@ describe("MCP invocation allowlist", () => {
     expect(() =>
       validateMcpInvocation("npx", [PINNED_MCP_PACKAGE, "--allow-evil"]),
     ).toThrow();
+  });
+});
+
+function fakeServerScript(evaluateBehavior: string): string {
+  return `
+const readline = require("node:readline");
+const rl = readline.createInterface({ input: process.stdin });
+function send(obj) { process.stdout.write(JSON.stringify(obj) + "\\n"); }
+rl.on("line", (line) => {
+  let msg;
+  try { msg = JSON.parse(line); } catch { return; }
+  if (msg.method === "initialize") {
+    send({ jsonrpc: "2.0", id: msg.id, result: {} });
+  } else if (msg.method === "tools/call") {
+    const name = msg.params && msg.params.name;
+    if (name === "browser_evaluate") {
+      ${evaluateBehavior}
+    } else {
+      send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "ok" }] } });
+    }
+  } else if (msg.id !== undefined) {
+    send({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "Method not found" } });
+  }
+});
+`;
+}
+
+describe("MCP pre-read URL enforcement (fail closed)", () => {
+  let tmpDir: string | undefined;
+  let adapter: McpPlaywrightAdapter | undefined;
+
+  afterEach(async () => {
+    await adapter?.cleanup();
+    adapter = undefined;
+    if (tmpDir) {
+      await rm(tmpDir, { recursive: true, force: true });
+      tmpDir = undefined;
+    }
+  });
+
+  async function makeAdapter(evaluateBehavior: string): Promise<{
+    adapter: McpPlaywrightAdapter;
+    context: BrowserExecutionContext;
+  }> {
+    tmpDir = await mkdtemp(join(tmpdir(), "qe-mcp-failclosed-"));
+    const serverDir = join(tmpDir, "node_modules", "@playwright", "mcp");
+    await mkdir(serverDir, { recursive: true });
+    const serverPath = join(serverDir, "cli.js");
+    await writeFile(serverPath, fakeServerScript(evaluateBehavior), "utf-8");
+    // Command policy confines execution inside a real repository root.
+    const repoRoot = join(tmpDir, "repo");
+    await mkdir(repoRoot, { recursive: true });
+    adapter = new McpPlaywrightAdapter({
+      command: process.execPath,
+      args: [serverPath],
+      startupTimeoutMs: 10_000,
+      callTimeoutMs: 5_000,
+    });
+    return { adapter, context: makeContext(repoRoot) };
+  }
+
+  it("denies assertions when browser_evaluate fails", async () => {
+    const { adapter: a, context } = await makeAdapter(
+      `send({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: "evaluation failed" } });`,
+    );
+    const result = await a.executeAction(
+      {
+        type: "ASSERT_TEXT",
+        selector: { type: "text", value: "Welcome" },
+        value: "Welcome",
+      },
+      context,
+    );
+    expect(result.status).toBe("POLICY_DENIED");
+    expect(result.error).toMatch(/could not establish current origin/i);
+  });
+
+  it("denies screenshots when browser_evaluate returns garbage", async () => {
+    const { adapter: a, context } = await makeAdapter(
+      `send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "garbage with no url at all!!!" }] } });`,
+    );
+    const result = await a.executeAction(
+      { type: "SCREENSHOT", description: "page" },
+      context,
+    );
+    expect(result.status).toBe("POLICY_DENIED");
+  });
+
+  it("fails (non-passing) ASSERT_URL when the URL cannot be established", async () => {
+    const { adapter: a, context } = await makeAdapter(
+      `send({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: "evaluation failed" } });`,
+    );
+    const result = await a.executeAction(
+      { type: "ASSERT_URL", url: "http://localhost:3210" },
+      context,
+    );
+    expect(result.status).not.toBe("PASS");
+  });
+
+  it("denies ASSERT_URL on a denied origin", async () => {
+    const { adapter: a, context } = await makeAdapter(
+      `send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: '"http://evil.example.com/stolen"' }] } });`,
+    );
+    const result = await a.executeAction(
+      { type: "ASSERT_URL", url: "http://evil.example.com/stolen" },
+      context,
+    );
+    expect(result.status).toBe("POLICY_DENIED");
+    expect(result.error).toMatch(/denied before read/i);
   });
 });
