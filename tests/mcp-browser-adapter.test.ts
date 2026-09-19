@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -162,7 +162,11 @@ describe("McpPlaywrightAdapter", () => {
 
   async function makeServerAdapter(): Promise<McpPlaywrightAdapter> {
     tmpDir = await mkdtemp(join(tmpdir(), "qe-mcp-"));
-    const serverPath = join(tmpDir, "fake-mcp.js");
+    // Path mirrors the provisioned layout (<...>/node_modules/@playwright/mcp/cli.js)
+    // so the controlled-execution allowlist accepts the test double.
+    const serverDir = join(tmpDir, "node_modules", "@playwright", "mcp");
+    await mkdir(serverDir, { recursive: true });
+    const serverPath = join(serverDir, "cli.js");
     await writeFile(serverPath, FAKE_MCP_SERVER, "utf-8");
     adapter = new McpPlaywrightAdapter({
       command: process.execPath,
@@ -179,9 +183,11 @@ describe("McpPlaywrightAdapter", () => {
   });
 
   it("reports unavailable when the server cannot be spawned", async () => {
+    // Allowed invocation shape, but the CLI file does not exist, so the
+    // spawn fails and available() reports false.
     const a = new McpPlaywrightAdapter({
-      command: "/nonexistent/qe-mcp-binary",
-      args: [],
+      command: process.execPath,
+      args: ["/nonexistent/node_modules/@playwright/mcp/cli.js"],
       startupTimeoutMs: 3_000,
     });
     adapter = a;

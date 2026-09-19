@@ -1,4 +1,6 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
+import { mkdirSync, existsSync, realpathSync } from "node:fs";
+import { join, resolve } from "node:path";
 import type { BrowserCapability } from "./capability.js";
 import type {
   BrowserAction,
@@ -11,6 +13,11 @@ import type {
 import { executeScenarioActions } from "./scenario-executor.js";
 import { evaluateUrlPolicy } from "./url-policy.js";
 import { redactSecrets } from "../../execution/secret-redactor.js";
+import {
+  launchControlledMcp,
+  killMcpProcessTree,
+  validateMcpInvocation,
+} from "./mcp-launcher.js";
 
 /**
  * BrowserCapability implementation backed by a Playwright MCP server
@@ -64,9 +71,71 @@ export class McpPlaywrightAdapter implements BrowserCapability {
   >();
   private buffer = "";
   private readonly options: McpPlaywrightOptions;
+  private screenshotCount = 0;
 
   constructor(options: McpPlaywrightOptions) {
+    // Controlled-execution boundary: reject non-provisioned invocations
+    // at construction time so no unapproved executable can be spawned.
+    validateMcpInvocation(options.command, options.args);
     this.options = options;
+  }
+
+  /**
+   * Build a confined screenshot path beneath the QE artifact directory.
+   * The model-controlled `description` is sanitized to a basename
+   * fragment only — traversal segments, absolute paths, and special
+   * characters can never escape the artifact boundary. Returns null
+   * when the resolved path would leave the repository root.
+   */
+  static buildScreenshotPath(
+    description: string | undefined,
+    context: BrowserExecutionContext,
+    index: number,
+  ): string | null {
+    const fragment = (description ?? "screenshot")
+      .toLowerCase()
+      .replace(/[^a-z0-9-_]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60);
+    const safeFragment = fragment.length > 0 ? fragment : "screenshot";
+    const repoRoot = resolve(context.repositoryRoot);
+    const artifactBase = resolve(repoRoot, context.artifactDir);
+    const dir = join(artifactBase, "browser", "screenshots");
+    const filePath = join(dir, `${safeFragment}-${index}.png`);
+    const resolvedPath = resolve(filePath);
+    if (resolvedPath !== repoRoot && !resolvedPath.startsWith(repoRoot + "/")) {
+      return null;
+    }
+    if (resolve(dir) !== repoRoot && !resolve(dir).startsWith(repoRoot + "/")) {
+      return null;
+    }
+    return resolvedPath;
+  }
+
+  /** Ensure the screenshot directory exists within the boundary. */
+  private ensureScreenshotDir(context: BrowserExecutionContext): boolean {
+    try {
+      const repoRoot = resolve(context.repositoryRoot);
+      const dir = join(
+        resolve(repoRoot, context.artifactDir),
+        "browser",
+        "screenshots",
+      );
+      if (
+        resolve(dir) !== repoRoot &&
+        !resolve(dir).startsWith(repoRoot + "/")
+      ) {
+        return false;
+      }
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      const realDir = realpathSync(dir);
+      if (realDir !== repoRoot && !realDir.startsWith(repoRoot + "/")) {
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async available(): Promise<boolean> {
@@ -116,11 +185,11 @@ export class McpPlaywrightAdapter implements BrowserCapability {
             ref: this.selectorToRef(action.selector!),
             value: action.value ?? "",
           });
-          return {
-            action: this.redactActionSecrets(action, context.secrets),
-            status: "PASS",
-            durationMs: elapsed(),
-          };
+          return await this.postActionResult(
+            this.redactActionSecrets(action, context.secrets),
+            context,
+            startTime,
+          );
 
         case "SELECT":
           await this.callTool("browser_select_option", {
@@ -128,7 +197,7 @@ export class McpPlaywrightAdapter implements BrowserCapability {
             ref: this.selectorToRef(action.selector!),
             values: [action.value ?? ""],
           });
-          return { action, status: "PASS", durationMs: elapsed() };
+          return await this.postActionResult(action, context, startTime);
 
         case "CHECK":
         case "UNCHECK":
@@ -139,22 +208,36 @@ export class McpPlaywrightAdapter implements BrowserCapability {
               ref: this.selectorToRef(action.selector!),
             },
           );
-          return { action, status: "PASS", durationMs: elapsed() };
+          return await this.postActionResult(action, context, startTime);
 
         case "PRESS":
           await this.callTool("browser_press_key", { key: action.key! });
           return await this.postActionResult(action, context, startTime);
 
-        case "ASSERT_TEXT":
+        case "ASSERT_TEXT": {
+          const preCheck = await this.verifyCurrentUrlPolicy(
+            action,
+            context,
+            startTime,
+          );
+          if (preCheck) return preCheck;
           return await this.assertSnapshotText(action, context, startTime);
+        }
 
         case "ASSERT_VISIBLE":
-        case "ASSERT_HIDDEN":
+        case "ASSERT_HIDDEN": {
+          const preCheck = await this.verifyCurrentUrlPolicy(
+            action,
+            context,
+            startTime,
+          );
+          if (preCheck) return preCheck;
           return await this.assertSnapshotVisibility(
             action,
             context,
             startTime,
           );
+        }
 
         case "ASSERT_URL": {
           const currentUrl = await this.currentUrl();
@@ -170,16 +253,50 @@ export class McpPlaywrightAdapter implements BrowserCapability {
           };
         }
 
-        case "ASSERT_VALUE":
+        case "ASSERT_VALUE": {
+          const preCheck = await this.verifyCurrentUrlPolicy(
+            action,
+            context,
+            startTime,
+          );
+          if (preCheck) return preCheck;
           return await this.assertSnapshotValue(action, context, startTime);
+        }
 
-        case "SCREENSHOT":
-          // MCP-managed browser captures screenshots server-side;
-          // no local artifact is written by QE.
+        case "SCREENSHOT": {
+          const preCheck = await this.verifyCurrentUrlPolicy(
+            action,
+            context,
+            startTime,
+          );
+          if (preCheck) return preCheck;
+          const confined = McpPlaywrightAdapter.buildScreenshotPath(
+            action.description,
+            context,
+            this.screenshotCount,
+          );
+          if (!confined || !this.ensureScreenshotDir(context)) {
+            return {
+              action,
+              status: "FAIL",
+              durationMs: elapsed(),
+              error: "Artifact path outside repository boundary",
+            };
+          }
+          // Pass only the confined absolute path; the model-controlled
+          // description never reaches the MCP server as a path.
           await this.callTool("browser_take_screenshot", {
-            filename: `${action.description ?? "screenshot"}.png`,
+            filename: confined,
           });
-          return { action, status: "PASS", durationMs: elapsed() };
+          this.screenshotCount++;
+          return {
+            action,
+            status: "PASS",
+            durationMs: elapsed(),
+            url: await this.currentUrl().catch(() => undefined),
+            screenshotPath: confined,
+          };
+        }
 
         default:
           return {
@@ -217,15 +334,18 @@ export class McpPlaywrightAdapter implements BrowserCapability {
     } catch {
       // best-effort
     }
-    const exited = new Promise<void>((resolve) => {
-      proc.once("exit", () => resolve());
-    });
-    proc.kill("SIGTERM");
+    // Process-tree cleanup via the controlled launcher (process group).
     await Promise.race([
-      exited,
-      new Promise<void>((resolve) => setTimeout(() => resolve(), 2_000)),
+      (async () => {
+        await killMcpProcessTree(proc);
+      })(),
+      new Promise<void>((resolve) => setTimeout(() => resolve(), 4_000)),
     ]);
-    if (!proc.killed) proc.kill("SIGKILL");
+    try {
+      if (!proc.killed) proc.kill("SIGKILL");
+    } catch {
+      // already dead
+    }
   }
 
   // --- Action helpers ---
@@ -271,6 +391,35 @@ export class McpPlaywrightAdapter implements BrowserCapability {
       durationMs: Date.now() - startTime,
       url: currentUrl,
     };
+  }
+
+  /**
+   * Verify the current origin before reading or capturing browser state.
+   * Returns a POLICY_DENIED result when the page has left the allowed
+   * origins, or null when it is safe to proceed.
+   */
+  private async verifyCurrentUrlPolicy(
+    action: BrowserAction,
+    context: BrowserExecutionContext,
+    startTime: number,
+  ): Promise<BrowserActionResult | null> {
+    let currentUrl: string;
+    try {
+      currentUrl = await this.currentUrl();
+    } catch {
+      return null;
+    }
+    const policy = evaluateUrlPolicy(currentUrl, context.allowedOrigins);
+    if (!policy.allowed) {
+      return {
+        action,
+        status: "POLICY_DENIED",
+        durationMs: Date.now() - startTime,
+        url: currentUrl,
+        error: `Current origin denied before read: ${currentUrl}`,
+      };
+    }
+    return null;
   }
 
   private async assertSnapshotText(
@@ -404,10 +553,12 @@ export class McpPlaywrightAdapter implements BrowserCapability {
   private async ensureServer(): Promise<void> {
     if (this.process && !this.process.killed) return;
 
-    const proc = spawn(this.options.command, this.options.args, {
+    // Controlled-execution boundary: validated, env-filtered,
+    // detached (process-group) spawn with bounded output capture.
+    const { proc } = launchControlledMcp({
+      command: this.options.command,
+      args: this.options.args,
       cwd: this.options.cwd,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env },
     });
 
     proc.on("error", (err) => {
@@ -427,15 +578,20 @@ export class McpPlaywrightAdapter implements BrowserCapability {
 
     // MCP initialize handshake
     const startupTimeoutMs = this.options.startupTimeoutMs ?? 15_000;
-    await this.request(
-      "initialize",
-      {
-        protocolVersion: "2025-06-18",
-        capabilities: {},
-        clientInfo: { name: "qe-agent", version: "0.1.0" },
-      },
-      startupTimeoutMs,
-    );
+    try {
+      await this.request(
+        "initialize",
+        {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "qe-agent", version: "0.1.0" },
+        },
+        startupTimeoutMs,
+      );
+    } catch (err) {
+      await this.cleanup();
+      throw err;
+    }
 
     await this.notify("notifications/initialized");
   }

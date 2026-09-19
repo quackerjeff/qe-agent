@@ -8,7 +8,7 @@ This guide uses three terms consistently:
 
 - **qe-agent repository** — the repository containing QE Agent's source code
 - **target repository** — the software project you want QE Agent to analyze and validate
-- **requirements file** — a Markdown document listing the requirements *of your target repository*
+- **requirements file** — a Markdown document listing the requirements _of your target repository_
 
 ## Prerequisites
 
@@ -95,15 +95,15 @@ cp .env.example .env   # then edit with your values
 
 The CLI loads `.env` automatically at startup (plain `KEY=VALUE` lines; real environment variables take precedence). Supported variables:
 
-| Variable | Purpose |
-|----------|---------|
-| `OPENAI_API_KEY` | Model provider API key |
-| `QE_MODEL_BASE_URL` | Overrides `model.baseUrl` — point at a local OpenAI-compatible endpoint (llama.cpp/llama-swap, ollama, vLLM) without committing addresses |
-| `QE_MODEL` | Overrides `model.model` — keep environment-specific model names out of `.qe/config.yml` |
-| `OPENCODE_SERVER_URL` | OpenCode server base URL for `opencode publish` |
-| `QE_OPENCODE_SESSION_ID` | Target session for result delivery |
-| `OPENCODE_SERVER_PASSWORD` | OpenCode server basic-auth password (redacted from all output) |
-| `GITHUB_TOKEN` | GitHub publishing token (redacted from all output) |
+| Variable                   | Purpose                                                                                                                                   |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `OPENAI_API_KEY`           | Model provider API key                                                                                                                    |
+| `QE_MODEL_BASE_URL`        | Overrides `model.baseUrl` — point at a local OpenAI-compatible endpoint (llama.cpp/llama-swap, ollama, vLLM) without committing addresses |
+| `QE_MODEL`                 | Overrides `model.model` — keep environment-specific model names out of `.qe/config.yml`                                                   |
+| `OPENCODE_SERVER_URL`      | OpenCode server base URL for `opencode publish`                                                                                           |
+| `QE_OPENCODE_SESSION_ID`   | Target session for result delivery                                                                                                        |
+| `OPENCODE_SERVER_PASSWORD` | OpenCode server basic-auth password (redacted from all output)                                                                            |
+| `GITHUB_TOKEN`             | GitHub publishing token (redacted from all output)                                                                                        |
 
 Example local setup with no external API:
 
@@ -114,6 +114,7 @@ QE_MODEL=your-local-model-name
 ```
 
 With `QE_MODEL_BASE_URL` set, `.qe/config.yml` can keep the generic default model and no address; the environment variable wins. The gateway then talks to your local OpenAI-compatible server and no key is required.
+
 ```
 
 **Security warnings:**
@@ -129,17 +130,19 @@ With `QE_MODEL_BASE_URL` set, `.qe/config.yml` can keep the generic default mode
 QE Agent can live in a separate directory from the project it validates. A typical layout:
 
 ```
+
 ~/Development/
-  qe-agent/            # QE Agent source (built once)
-  my-application/      # Target repository to validate
-```
+qe-agent/ # QE Agent source (built once)
+my-application/ # Target repository to validate
+
+````
 
 Use `--repo` to point QE Agent at the target repository:
 
 ```bash
 node ~/Development/qe-agent/dist/cli/main.js analyze \
   --repo ~/Development/my-application
-```
+````
 
 When `--repo` is omitted, QE Agent uses the current working directory as the target repository. You can also `cd` into your project and run QE from there:
 
@@ -161,10 +164,10 @@ node ~/Development/qe-agent/dist/cli/main.js analyze \
 
 Options:
 
-| Option | Description |
-|--------|-------------|
+| Option          | Description                                            |
+| --------------- | ------------------------------------------------------ |
 | `--repo <path>` | Path to target repository (default: current directory) |
-| `--json` | Output analysis as JSON |
+| `--json`        | Output analysis as JSON                                |
 
 Analysis discovers:
 
@@ -238,10 +241,10 @@ node ~/Development/qe-agent/dist/cli/main.js init
 
 Running `init` creates:
 
-| Path | Purpose | Commit to Git? |
-|------|---------|----------------|
-| `.qe/config.yml` | QE configuration | Yes |
-| `.qe/.gitignore` | Ignores ephemeral artifacts | Yes |
+| Path             | Purpose                     | Commit to Git? |
+| ---------------- | --------------------------- | -------------- |
+| `.qe/config.yml` | QE configuration            | Yes            |
+| `.qe/.gitignore` | Ignores ephemeral artifacts | Yes            |
 
 Running `init` again when `.qe/config.yml` already exists does nothing — it will not overwrite existing configuration.
 
@@ -292,13 +295,17 @@ QE Agent supports two Markdown formats.
 # Requirements
 
 ## FR-001 User Authentication
+
 Users must authenticate before accessing the dashboard.
+
 - Unauthenticated requests return HTTP 401
 - Authenticated users can access the dashboard
 - Expired sessions are rejected with HTTP 401
 
 ## FR-002 Role-Based Access Control
+
 Access to admin features requires the admin role.
+
 - Non-admin users cannot access /admin routes
 - Admin users can access all admin routes
 - Role changes take effect on next login
@@ -310,10 +317,12 @@ The parser recognizes `## FR-NNN` or `## FR-NNNA` headings (e.g., `FR-001`, `FR-
 
 ```markdown
 # User Authentication
+
 - Unauthenticated requests return HTTP 401
 - Authenticated users can access the dashboard
 
 # Data Validation
+
 - Empty required fields are rejected
 - SQL injection attempts are blocked
 ```
@@ -327,7 +336,7 @@ Both formats support optional priority annotations on bullet items:
 - Nice to have behavior [priority: low]
 ```
 
-**Important:** Supply requirements that describe *your target project*, not QE Agent's own requirements. If you are validating `my-application`, write requirements for `my-application`. Accidentally supplying QE Agent's product requirements (`docs/Automated QE Agent — Product & Functional Requirements.md`) when validating an unrelated project will produce meaningless results.
+**Important:** Supply requirements that describe _your target project_, not QE Agent's own requirements. If you are validating `my-application`, write requirements for `my-application`. Accidentally supplying QE Agent's product requirements (`docs/Automated QE Agent — Product & Functional Requirements.md`) when validating an unrelated project will produce meaningless results.
 
 ## Verify a Project
 
@@ -342,14 +351,14 @@ node ~/Development/qe-agent/dist/cli/main.js verify \
 
 Options:
 
-| Option | Description |
-|--------|-------------|
-| `--requirements <file>` | Requirements file (Markdown) |
-| `--requirement <text...>` | Inline requirement(s) |
-| `--repo <path>` | Repository path (default: current directory) |
-| `--profile <profile>` | Execution profile: `quick`, `standard`, `deep` |
-| `--json` | Output result as JSON |
-| `--output <path>` | Write QE result JSON to file |
+| Option                    | Description                                    |
+| ------------------------- | ---------------------------------------------- |
+| `--requirements <file>`   | Requirements file (Markdown)                   |
+| `--requirement <text...>` | Inline requirement(s)                          |
+| `--repo <path>`           | Repository path (default: current directory)   |
+| `--profile <profile>`     | Execution profile: `quick`, `standard`, `deep` |
+| `--json`                  | Output result as JSON                          |
+| `--output <path>`         | Write QE result JSON to file                   |
 
 At least one of `--requirements` or `--requirement` is required.
 
@@ -377,11 +386,11 @@ npm run dev -- verify \
 
 Profiles control how much time and how many model calls QE Agent uses:
 
-| Profile | Max Duration | Max Model Calls | Max Retries | Max Generated Tests |
-|---------|-------------|-----------------|-------------|---------------------|
-| `quick` | 2 minutes | 6 | 1 | 1 |
-| `standard` | 10 minutes | 12 | 2 | 3 |
-| `deep` | 20 minutes | 24 | 3 | 8 |
+| Profile    | Max Duration | Max Model Calls | Max Retries | Max Generated Tests |
+| ---------- | ------------ | --------------- | ----------- | ------------------- |
+| `quick`    | 2 minutes    | 6               | 1           | 1                   |
+| `standard` | 10 minutes   | 12              | 2           | 3                   |
+| `deep`     | 20 minutes   | 24              | 3           | 8                   |
 
 When no `--profile` is specified, the value from `.qe/config.yml` is used (default: `standard`).
 
@@ -401,17 +410,17 @@ node ~/Development/qe-agent/dist/cli/main.js review \
 
 Options:
 
-| Option | Description |
-|--------|-------------|
-| `--base <ref>` | Baseline Git ref (**required**) |
-| `--target <ref>` | Target Git ref (default: `HEAD`) |
-| `--requirements <file>` | Requirements file (Markdown) |
-| `--requirement <text...>` | Inline requirement(s) |
-| `--repo <path>` | Repository path (default: current directory) |
-| `--profile <profile>` | Execution profile: `quick`, `standard`, `deep` |
-| `--json` | Output result as JSON |
-| `--output <path>` | Write QE result JSON to file |
-| `--ci` | CI mode: persist result and use configured exit codes |
+| Option                    | Description                                           |
+| ------------------------- | ----------------------------------------------------- |
+| `--base <ref>`            | Baseline Git ref (**required**)                       |
+| `--target <ref>`          | Target Git ref (default: `HEAD`)                      |
+| `--requirements <file>`   | Requirements file (Markdown)                          |
+| `--requirement <text...>` | Inline requirement(s)                                 |
+| `--repo <path>`           | Repository path (default: current directory)          |
+| `--profile <profile>`     | Execution profile: `quick`, `standard`, `deep`        |
+| `--json`                  | Output result as JSON                                 |
+| `--output <path>`         | Write QE result JSON to file                          |
+| `--ci`                    | CI mode: persist result and use configured exit codes |
 
 `review` differs from `verify` in that it:
 
@@ -468,17 +477,17 @@ node dist/cli/main.js exec --command npm --arg test --json
 
 Options:
 
-| Option | Description |
-|--------|-------------|
-| `--command <executable>` | Executable to run |
-| `--arg <arg...>` | Arguments to pass |
-| `--command-id <id>` | Run a discovered command by ID |
-| `--secret <value...>` | Secret values to redact from output |
-| `--env <KEY=VALUE...>` | Environment variables for the command |
-| `--repo <path>` | Repository path (default: current directory) |
-| `--timeout <seconds>` | Command timeout in seconds |
-| `--mode <mode>` | Execution mode: `local`, `docker`, `auto` |
-| `--json` | Output result as JSON |
+| Option                   | Description                                  |
+| ------------------------ | -------------------------------------------- |
+| `--command <executable>` | Executable to run                            |
+| `--arg <arg...>`         | Arguments to pass                            |
+| `--command-id <id>`      | Run a discovered command by ID               |
+| `--secret <value...>`    | Secret values to redact from output          |
+| `--env <KEY=VALUE...>`   | Environment variables for the command        |
+| `--repo <path>`          | Repository path (default: current directory) |
+| `--timeout <seconds>`    | Command timeout in seconds                   |
+| `--mode <mode>`          | Execution mode: `local`, `docker`, `auto`    |
+| `--json`                 | Output result as JSON                        |
 
 Use `exec` when you want to test a single command through QE Agent's safety controls before running a full verification. Execution safety features include: structured command execution (no shell injection), working directory confinement, dangerous executable blocking, timeout enforcement, process group cleanup on timeout, environment allowlist filtering, and secret redaction in all output and evidence.
 
@@ -498,12 +507,12 @@ node dist/cli/main.js github publish \
 
 Options:
 
-| Option | Description |
-|--------|-------------|
-| `--result <path>` | Path to QE result JSON file (**required**) |
-| `--repo <path>` | Repository path (default: current directory) |
-| `--dry-run` | Preview publishing without remote writes |
-| `--json` | Output publishing result as JSON |
+| Option            | Description                                  |
+| ----------------- | -------------------------------------------- |
+| `--result <path>` | Path to QE result JSON file (**required**)   |
+| `--repo <path>`   | Repository path (default: current directory) |
+| `--dry-run`       | Preview publishing without remote writes     |
+| `--json`          | Output publishing result as JSON             |
 
 ### `opencode publish`
 
@@ -517,13 +526,13 @@ node dist/cli/main.js opencode publish \
 
 Options:
 
-| Option | Description |
-|--------|-------------|
-| `--result <path>` | Path to QE result JSON file (**required**) |
-| `--repo <path>` | Repository path (default: current directory) |
-| `--session <id>` | OpenCode session ID to deliver into |
-| `--dry-run` | Preview delivery without sending |
-| `--json` | Output publishing result as JSON |
+| Option            | Description                                  |
+| ----------------- | -------------------------------------------- |
+| `--result <path>` | Path to QE result JSON file (**required**)   |
+| `--repo <path>`   | Repository path (default: current directory) |
+| `--session <id>`  | OpenCode session ID to deliver into          |
+| `--dry-run`       | Preview delivery without sending             |
+| `--json`          | Output publishing result as JSON             |
 
 The session target is resolved from `--session`, the `QE_OPENCODE_SESSION_ID` environment variable, or dry-run. The OpenCode server URL defaults to `http://127.0.0.1:4096` and can be overridden with `OPENCODE_SERVER_URL`. If the server is protected with `OPENCODE_SERVER_PASSWORD`, it is used for basic auth and redacted from all output.
 
@@ -556,28 +565,36 @@ On servers without a Chromium binary installed, browser validation falls back to
 
 ```yaml
 browser:
-  adapter: auto              # auto (default) | local | mcp
-  mcpCommand: npx             # optional override
-  mcpArgs: ["@playwright/mcp@latest", "--headless"]
+  adapter: auto # auto (default) | local | mcp
 ```
 
 - `auto` (default): tries local Chromium first; if the browser binary is missing (environment failure), the scenario is retried once through the Playwright MCP server.
 - `local`: local Chromium only — no fallback.
 - `mcp`: Playwright MCP server only — no local browser is launched.
 
-The MCP server is spawned only when browser validation actually runs, and is cleaned up after the run. URL policy, secret redaction, action validation, and budget enforcement apply identically under both adapters.
+> **Note:** `browser.mcpCommand` / `browser.mcpArgs` in `.qe/config.yml`
+> are accepted by the schema for backwards compatibility but are
+> **ignored at runtime** — repository configuration must not select
+> executables. The MCP server is operator-provisioned and launched
+> through the controlled-execution boundary (executable/implementation
+> allowlists, filtered environment, bounded output, process-group
+> cleanup); the default is a pinned `npx @playwright/mcp@<version>
+--headless` (explicit release, never `@latest` — downloads from the
+> npm registry on first use, so it needs network access at startup).
+
+The MCP server is spawned only when browser validation actually runs, and is cleaned up after the run. URL policy (checked after every state-changing action and before every read/capture), secret redaction, action validation, screenshot confinement to the QE artifact directory, and budget enforcement apply identically under both adapters.
 
 ## Understanding QE Output
 
 ### Verdicts
 
-| Verdict | Meaning |
-|---------|---------|
-| `PASS` | No material defect identified; evidence strongly supports expected behavior |
-| `PASS_WITH_CONCERNS` | No blocking defect but meaningful residual risk remains |
-| `NEEDS_REVIEW` | Evidence conflicts or material uncertainty requires human judgment |
-| `FAIL` | Demonstrated material defect, regression, or violated requirement |
-| `BLOCKED` | Critical validation could not be performed; insufficient evidence for a conclusion |
+| Verdict              | Meaning                                                                            |
+| -------------------- | ---------------------------------------------------------------------------------- |
+| `PASS`               | No material defect identified; evidence strongly supports expected behavior        |
+| `PASS_WITH_CONCERNS` | No blocking defect but meaningful residual risk remains                            |
+| `NEEDS_REVIEW`       | Evidence conflicts or material uncertainty requires human judgment                 |
+| `FAIL`               | Demonstrated material defect, regression, or violated requirement                  |
+| `BLOCKED`            | Critical validation could not be performed; insufficient evidence for a conclusion |
 
 A successful QE execution does not require a `PASS` verdict. `FAIL` means QE found a demonstrated defect — that is useful information, not a malfunction.
 
@@ -595,13 +612,13 @@ QE Agent assesses the risk level of the target repository as `LOW`, `MEDIUM`, `H
 
 Each requirement receives one of these statuses:
 
-| Status | Meaning |
-|--------|---------|
-| `VERIFIED` | Evidence supports that the requirement is met |
+| Status               | Meaning                                                            |
+| -------------------- | ------------------------------------------------------------------ |
+| `VERIFIED`           | Evidence supports that the requirement is met                      |
 | `PARTIALLY_VERIFIED` | Some acceptance criteria are supported by evidence, others are not |
-| `NOT_VERIFIED` | Insufficient evidence to determine whether the requirement is met |
-| `BLOCKED` | Validation could not be performed for this requirement |
-| `NOT_APPLICABLE` | Requirement was determined not to apply |
+| `NOT_VERIFIED`       | Insufficient evidence to determine whether the requirement is met  |
+| `BLOCKED`            | Validation could not be performed for this requirement             |
+| `NOT_APPLICABLE`     | Requirement was determined not to apply                            |
 
 **`NOT_VERIFIED` does not mean the requirement is violated.** It means QE Agent did not find sufficient evidence to verify it. This can happen because:
 
@@ -716,18 +733,18 @@ If you are configuring `.gitignore` manually in your project root, add:
 
 ### What to commit
 
-| Path | Commit? | Reason |
-|------|---------|--------|
-| `.qe/config.yml` | Yes | Project-specific QE configuration |
-| `.qe/.gitignore` | Yes | Ensures ephemeral artifacts are ignored |
-| `.qe/runs/` | No | Ephemeral per-run diagnostics and results |
-| `.qe/cache/` | No | Ephemeral runtime cache |
-| `.qe/artifacts/` | No | Ephemeral execution artifacts |
-| `.qe/traces/` | No | Ephemeral execution traces |
+| Path             | Commit?  | Reason                                                                |
+| ---------------- | -------- | --------------------------------------------------------------------- |
+| `.qe/config.yml` | Yes      | Project-specific QE configuration                                     |
+| `.qe/.gitignore` | Yes      | Ensures ephemeral artifacts are ignored                               |
+| `.qe/runs/`      | No       | Ephemeral per-run diagnostics and results                             |
+| `.qe/cache/`     | No       | Ephemeral runtime cache                                               |
+| `.qe/artifacts/` | No       | Ephemeral execution artifacts                                         |
+| `.qe/traces/`    | No       | Ephemeral execution traces                                            |
 | `.qe/knowledge/` | Optional | QE project memory (model-generated observations about the repository) |
-| `.qe/history/` | Optional | QE run history summaries |
-| `.qe/RISKS.md` | Optional | Model-generated risk observations |
-| `.qe/TESTING.md` | Optional | Model-generated testing observations |
+| `.qe/history/`   | Optional | QE run history summaries                                              |
+| `.qe/RISKS.md`   | Optional | Model-generated risk observations                                     |
+| `.qe/TESTING.md` | Optional | Model-generated testing observations                                  |
 
 The `knowledge/`, `history/`, `RISKS.md`, and `TESTING.md` files are generated by QE Agent's memory system. They contain model-generated observations about your repository that persist across runs. Whether to commit these depends on whether your team finds them useful as shared context.
 
@@ -750,7 +767,11 @@ tests:
   commitPermanentTests: true
 browser:
   enabled: auto
+  adapter: auto
   headless: true
+  baseUrl: http://localhost:3000
+  allowedOrigins:
+    - http://localhost:3000
 ci:
   failOn:
     - FAIL
@@ -766,30 +787,40 @@ github:
 memory:
   enabled: true
   historySummaries: true
+opencode:
+  messageEnabled: true
+  toastEnabled: true
+  dryRun: false
 model:
   provider: openai
   model: gpt-4o
+  baseUrl: https://api.openai.com/v1
 reasoning:
   maxModelCalls: 12
 ```
 
 ### Key configuration options
 
-| Section | Key | Description |
-|---------|-----|-------------|
-| `profile` | — | Default execution profile: `quick`, `standard`, `deep` |
-| `execution.mode` | — | Command execution mode: `auto`, `local`, `docker` |
-| `execution.commandTimeoutSeconds` | — | Per-command timeout |
-| `execution.maxOutputBytes` | — | Maximum captured output per command |
-| `tests.generation` | — | Whether QE Agent may generate tests |
-| `browser.enabled` | — | Browser testing: `auto`, `true`, `false` |
-| `ci.failOn` | — | Verdicts that cause non-zero exit in `--ci` mode |
-| `model.provider` | — | Model provider: `openai` (direct API), `opencode` (QE reasoning through the real `opencode` CLI headless — uses OpenCode's own configured model and auth) |
-| `model.model` | — | Model name (e.g., `gpt-4o`, `gpt-4o-mini`) |
-| `model.tpmLimit` | — | Tokens-per-minute throughput limit |
-| `reasoning.maxModelCalls` | — | Maximum model calls per run |
-| `reasoning.maxOutputTokens` | — | Per-call response-token floor. Raises prompt-defined ceilings when using reasoning models whose hidden thinking tokens count against the response budget (e.g. ollama/OpenAI-compatible endpoints serving reasoning models). Never lowers. Unset = no floor. |
-| `memory.enabled` | — | Whether project memory persists across runs |
+| Section                                                                 | Key | Description                                                                                                                                                                                                                                                  |
+| ----------------------------------------------------------------------- | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `profile`                                                               | —   | Default execution profile: `quick`, `standard`, `deep`                                                                                                                                                                                                       |
+| `execution.mode`                                                        | —   | Command execution mode: `auto`, `local`, `docker`                                                                                                                                                                                                            |
+| `execution.commandTimeoutSeconds`                                       | —   | Per-command timeout                                                                                                                                                                                                                                          |
+| `execution.maxOutputBytes`                                              | —   | Maximum captured output per command                                                                                                                                                                                                                          |
+| `tests.generation`                                                      | —   | Whether QE Agent may generate tests                                                                                                                                                                                                                          |
+| `browser.enabled`                                                       | —   | Browser testing: `auto`, `true`, `false`                                                                                                                                                                                                                     |
+| `browser.adapter`                                                       | —   | Browser backend: `auto` (local-first with MCP fallback), `local`, `mcp`                                                                                                                                                                                      |
+| `browser.mcpCommand` / `browser.mcpArgs`                                | —   | **Ignored at runtime** (legacy schema keys; repository config must not select executables — MCP is operator-provisioned, see above)                                                                                                                          |
+| `browser.baseUrl` / `browser.allowedOrigins`                            | —   | Base URL and extra allowed origins for browser validation                                                                                                                                                                                                    |
+| `ci.failOn`                                                             | —   | Verdicts that cause non-zero exit in `--ci` mode                                                                                                                                                                                                             |
+| `model.provider`                                                        | —   | Model provider: `openai` (direct API), `opencode` (QE reasoning through the real `opencode` CLI headless — uses OpenCode's own configured model and auth)                                                                                                    |
+| `model.model`                                                           | —   | Model name (e.g., `gpt-4o`, `gpt-4o-mini`)                                                                                                                                                                                                                   |
+| `model.baseUrl`                                                         | —   | OpenAI-compatible base URL (local llama.cpp/llama-swap, ollama, vLLM). Prefer `QE_MODEL_BASE_URL` env to avoid committing addresses                                                                                                                          |
+| `model.tokenLimit` / `model.tpmLimit`                                   | —   | Context/token and tokens-per-minute throughput limits                                                                                                                                                                                                        |
+| `opencode.messageEnabled` / `opencode.toastEnabled` / `opencode.dryRun` | —   | OpenCode result delivery toggles (see `opencode publish`)                                                                                                                                                                                                    |
+| `reasoning.maxModelCalls`                                               | —   | Maximum model calls per run                                                                                                                                                                                                                                  |
+| `reasoning.maxOutputTokens`                                             | —   | Per-call response-token floor. Raises prompt-defined ceilings when using reasoning models whose hidden thinking tokens count against the response budget (e.g. ollama/OpenAI-compatible endpoints serving reasoning models). Never lowers. Unset = no floor. |
+| `memory.enabled`                                                        | —   | Whether project memory persists across runs                                                                                                                                                                                                                  |
 
 ## Recommended First Run
 
@@ -836,6 +867,7 @@ Your job is to REPORT findings, not to fix QE Agent.
 ## Setup
 
 1. Record the target repository's current Git state:
+
    ```
    cd <target-repository>
    git status --short
@@ -857,11 +889,13 @@ Your job is to REPORT findings, not to fix QE Agent.
 ## Execution
 
 4. Run QE Agent analyze and record the output:
+
    ```
    node <qe-agent>/dist/cli/main.js analyze --repo <target-repository>
    ```
 
 5. Run QE Agent verify:
+
    ```
    OPENAI_API_KEY="..." node <qe-agent>/dist/cli/main.js verify \
      --profile quick \
@@ -897,10 +931,12 @@ Your job is to REPORT findings, not to fix QE Agent.
     - Did any calls hit OutputTruncationError or SchemaValidationError?
 
 12. Inspect repository cleanliness:
+
     ```
     cd <target-repository>
     git status --short
     ```
+
     Were any files created, modified, or deleted?
 
 13. Independently sanity-check the verdict:
@@ -938,6 +974,7 @@ If you observe ANY of the following, stop evaluation and report immediately:
 ## Report Format
 
 Report findings as a numbered list. For each:
+
 1. Classification
 2. Description
 3. Evidence (diagnostics excerpt, command output, file path)
@@ -950,7 +987,7 @@ Do NOT implement fixes to QE Agent during this evaluation.
 
 When a cross-project acceptance evaluation discovers a reproducible QE defect, use this prompt to diagnose the root cause before implementing any correction.
 
-````markdown
+```markdown
 # QE Agent Root Cause Analysis
 
 A reproducible defect was discovered during cross-project acceptance.
@@ -1029,7 +1066,7 @@ A reproducible defect was discovered during cross-project acceptance.
 The purpose of this analysis is diagnosis. Report findings and proposed
 correction. Implementation requires a separate, scoped correction task
 with its own regression-preservation contract.
-````
+```
 
 ## Surgical Fix Prompt
 
@@ -1077,6 +1114,7 @@ After an RCA has established a root cause, use this prompt to implement the corr
 
 6. **Validation sequence:**
    After the code change:
+
    ```
    npm run typecheck
    npm run lint

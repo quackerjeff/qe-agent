@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, constants, stat } from "node:fs/promises";
+import { access, constants, realpath, stat } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { promisify } from "node:util";
 import type { GitInfo } from "../types/index.js";
@@ -59,9 +59,18 @@ export async function discoverRoot(
   if (explicit) {
     // An explicitly given repository path is the root, full stop. Git
     // metadata may still be reported, but only when its root matches the
-    // given path (a parent repo must not swallow the target).
-    if (git.detected && git.root === absolutePath) {
-      return { root: absolutePath, git };
+    // given path (a parent repo must not swallow the target). Both
+    // sides are canonicalized with realpath so equivalent path aliases
+    // (e.g. /var/... vs /private/var/... on macOS, symlinked tmpdirs)
+    // compare equal.
+    if (git.detected && git.root) {
+      const [canonicalInput, canonicalGitRoot] = await Promise.all([
+        canonicalize(absolutePath),
+        canonicalize(git.root),
+      ]);
+      if (canonicalGitRoot === canonicalInput) {
+        return { root: absolutePath, git };
+      }
     }
     return { root: absolutePath, git: { detected: false } };
   }
@@ -140,5 +149,18 @@ async function detectGit(path: string): Promise<GitInfo> {
     return { detected: true, root: root.trim(), branch };
   } catch {
     return { detected: false };
+  }
+}
+
+/**
+ * Canonicalize a path for identity comparison (symlinks, /var vs
+ * /private/var aliases, tmpdir indirection). Falls back to the
+ * resolved input when the path does not exist.
+ */
+export async function canonicalize(p: string): Promise<string> {
+  try {
+    return await realpath(p);
+  } catch {
+    return resolve(p);
   }
 }

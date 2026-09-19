@@ -31,6 +31,9 @@ export const QEConfigSchema = z.object({
     .object({
       enabled: z.union([z.literal("auto"), z.boolean()]).default("auto"),
       adapter: z.enum(["auto", "local", "mcp"]).default("auto"),
+      // Legacy keys: accepted so old configs still parse, but IGNORED
+      // at runtime — repository config must not select executables
+      // (ADR-012). The MCP server is operator-provisioned.
       mcpCommand: z.string().optional(),
       mcpArgs: z.array(z.string()).optional(),
       baseUrl: z.string().optional(),

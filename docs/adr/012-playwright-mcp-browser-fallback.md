@@ -36,18 +36,42 @@ when no local Chromium binary exists.
    ```yaml
    browser:
      adapter: auto   # auto (default) | local | mcp
-     mcpCommand: npx  # optional override
-     mcpArgs: ["@playwright/mcp@latest", "--headless"]
    ```
+
+   Repository-controlled `browser.mcpCommand` / `browser.mcpArgs` are
+   intentionally **ignored** (the evaluated repository is untrusted and
+   must not select executables). The MCP invocation is provisioned by
+   the operator/host only — see §6.
 
 4. The QE Agent never spawns an MCP server unless browser validation is
    actually executed; construction is lazy and the server is cleaned up
    deterministically after the run.
 
 5. Safety properties are preserved regardless of adapter: the same action
-   validator, URL policy, secret redaction, budget enforcement, and
-   artifact-boundary rules apply. Evidence records the adapter source so
-   verdicts remain explainable.
+   validator, URL policy (checked after every state-changing action —
+   NAVIGATE, CLICK, FILL, SELECT, CHECK, UNCHECK, PRESS — and before
+   every read/capture), secret redaction, budget enforcement, and
+   artifact-boundary rules (internally generated, sanitized screenshot
+   paths confined beneath the QE artifact directory) apply. Evidence
+   records the adapter source so verdicts remain explainable.
+
+6. Controlled execution and provisioning. The MCP server is a
+   long-lived stdio child process and cannot flow through the one-shot
+   `ExecutionController.execute`, so it is launched through the
+   dedicated controlled-execution boundary in
+   `src/core/browser/mcp-launcher.ts`, which provides the same
+   properties: an executable allowlist (node/npx only), an
+   implementation allowlist (the provisioned `@playwright/mcp` CLI
+   only), filtered environment, bounded stderr capture, and
+   process-group cleanup. Resolution order: `QE_PLAYWRIGHT_MCP_CLI`
+   operator override → harness settings / npx cache discovery (each
+   entry re-validated against the allowlist) → pinned
+   `npx @playwright/mcp@<pinned> --headless` network default. The
+   default is pinned to an explicit release (never `@latest`). The
+   pinned network fallback downloads from the npm registry on first
+   use and therefore requires network access at MCP startup; prefer a
+   locally provisioned `@playwright/mcp` (operator env override or
+   harness/npx cache) on offline or locked-down hosts.
 
 ## Alternatives Considered
 
@@ -62,7 +86,9 @@ when no local Chromium binary exists.
 ## Consequences
 
 - Browser QE works on hosts without a local browser binary, provided
-  Node/npx can launch `@playwright/mcp`.
+  Node/npx can launch the provisioned `@playwright/mcp` (pinned
+  release; local provision preferred, network fetch on first use only
+  as a fallback).
 - Verdict quality is preserved: environment failures fall back
   transparently, and evidence distinguishes which adapter executed.
 - MCP tool calls are slightly less expressive than raw Playwright (snapshot

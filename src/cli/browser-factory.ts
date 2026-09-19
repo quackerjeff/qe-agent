@@ -5,13 +5,16 @@ import {
   McpPlaywrightAdapter,
   CompositeBrowserCapability,
 } from "../core/browser/index.js";
+import { PINNED_MCP_PACKAGE } from "../core/browser/mcp-launcher.js";
 
 /**
- * Default Playwright MCP server invocation (stdio JSON-RPC).
- * Matches how OpenCode and other harnesses launch Playwright MCP.
+ * Pinned Playwright MCP invocation (stdio JSON-RPC) used when no
+ * operator-provisioned installation is available. Pinned to an explicit
+ * release — never `@latest` (supply-chain pin). Network fetch occurs on
+ * first use; see ADR-012 for provisioning.
  */
 export const DEFAULT_MCP_COMMAND = "npx";
-export const DEFAULT_MCP_ARGS = ["@playwright/mcp@latest", "--headless"];
+export const DEFAULT_MCP_ARGS = [PINNED_MCP_PACKAGE, "--headless"];
 
 /**
  * Build the browser capability from QE configuration.
@@ -24,6 +27,14 @@ export const DEFAULT_MCP_ARGS = ["@playwright/mcp@latest", "--headless"];
  * The orchestrator never spawns an MCP server unless the browser
  * capability is actually used; construction here is lazy and
  * `available()` is only probed at execution time.
+ *
+ * Repository-controlled `browser.mcpCommand` / `browser.mcpArgs` are
+ * intentionally NOT honored: the evaluated repository is untrusted and
+ * must not select an executable. When present they are ignored (with a
+ * stderr warning). The MCP server is operator-provisioned and launched
+ * through the controlled-execution boundary
+ * (`src/core/browser/mcp-launcher.ts`), which enforces the executable
+ * and implementation allowlists.
  */
 export function createBrowserCapability(
   config: QEConfig,
@@ -36,9 +47,19 @@ export function createBrowserCapability(
     return local;
   }
 
+  if (config.browser.mcpCommand) {
+    // Prohibited: repository-controlled executable selection. Ignore
+    // and fall back to the provisioned Playwright MCP.
+    process.stderr.write(
+      "[qe] warning: browser.mcpCommand in .qe/config.yml is ignored — " +
+        "repository config must not select executables (ADR-012). " +
+        "Using provisioned Playwright MCP instead.\n",
+    );
+  }
+
   const mcp = new McpPlaywrightAdapter({
-    command: config.browser.mcpCommand ?? DEFAULT_MCP_COMMAND,
-    args: config.browser.mcpArgs ?? DEFAULT_MCP_ARGS,
+    command: DEFAULT_MCP_COMMAND,
+    args: DEFAULT_MCP_ARGS,
   });
 
   if (adapter === "mcp") {
