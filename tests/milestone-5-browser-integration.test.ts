@@ -1,3 +1,4 @@
+import { getFreePort } from "./helpers/free-port.js";
 import { describe, it, expect, afterEach } from "vitest";
 import { PlaywrightAdapter } from "../src/core/browser/playwright-adapter.js";
 import { ManagedProcess } from "../src/core/browser/managed-process.js";
@@ -31,10 +32,6 @@ function makeContext(
   };
 }
 
-function randomPort(): number {
-  return 4100 + Math.floor(Math.random() * 900);
-}
-
 describe("Browser Integration — Evaluation Scenarios", () => {
   let adapter: PlaywrightAdapter;
   let managedProcess: ManagedProcess | null = null;
@@ -57,7 +54,7 @@ describe("Browser Integration — Evaluation Scenarios", () => {
   it(
     "Scenario A: passing browser flow — navigate, interact, assert PASS, cleanup",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -119,7 +116,7 @@ describe("Browser Integration — Evaluation Scenarios", () => {
     "Scenario B: introduced UI regression — baseline PASS, target FAIL, INTRODUCED",
     async () => {
       // Target (regression mode): submission returns error
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -189,7 +186,7 @@ describe("Browser Integration — Evaluation Scenarios", () => {
       await managedProcess.stop();
 
       // Baseline (passing mode): submission succeeds
-      const basePort = randomPort();
+      const basePort = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -237,7 +234,7 @@ describe("Browser Integration — Evaluation Scenarios", () => {
   it(
     "Scenario C: pre-existing UI failure — both baseline and target fail => PRE_EXISTING",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -297,7 +294,7 @@ describe("Browser Integration — Evaluation Scenarios", () => {
   it(
     "Scenario D: bad selector — not automatically a product defect",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -361,7 +358,7 @@ describe("Browser Integration — Evaluation Scenarios", () => {
   it(
     "Scenario E: startup failure — truthful evidence, no fabricated browser evidence",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server-crash.cjs"],
@@ -389,7 +386,7 @@ describe("Browser Integration — Evaluation Scenarios", () => {
   it(
     "Scenario F: readiness timeout — managed process terminated, cleanup verified",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server-hang.cjs"],
@@ -418,7 +415,7 @@ describe("Browser Integration — Evaluation Scenarios", () => {
   it(
     "Scenario G: external navigation denied — external site never visited",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -473,7 +470,7 @@ describe("Browser Integration — Evaluation Scenarios", () => {
   it(
     "Scenario H: prompt injection page — URL policy and write policy remain enforced",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -539,7 +536,7 @@ describe("Browser Integration — Evaluation Scenarios", () => {
     async () => {
       // Demonstrate that a confirmed UI defect produces PRODUCT_DEFECT
       // and the evidence structure supports test generation flow
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -616,7 +613,7 @@ describe("Browser Integration — Process Cleanup", () => {
   it(
     "no orphaned processes after cleanup",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       const mp = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -652,7 +649,7 @@ describe("Browser Integration — Process Cleanup", () => {
     "adapter cleanup releases browser resources",
     async () => {
       const adapter = new PlaywrightAdapter();
-      const port = randomPort();
+      const port = await getFreePort();
       const mp = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],

@@ -11,10 +11,6 @@ import type { QERequest, QEResult } from "../src/types/index.js";
 
 const TEST_TIMEOUT = 60_000;
 
-function randomPort(): number {
-  return 6100 + Math.floor(Math.random() * 900);
-}
-
 // Create a git repo with a "passing" baseline commit and a "regression" target commit.
 // The server fixture uses APP_MODE env var, so the git content doesn't change the
 // fixture server behavior — but the worktree is created from a real baseline ref.
@@ -26,16 +22,11 @@ function createBrowserTestRepo(opts: {
   dir: string;
   baselineRef: string;
   targetRef: string;
-  targetPort: number;
-  baselinePort: number;
 } {
   const dir = mkdtempSync(join(tmpdir(), "qe-browser-baseline-"));
   execFileSync("git", ["init", "--initial-branch", "main"], { cwd: dir });
   execFileSync("git", ["config", "user.email", "test@test.com"], { cwd: dir });
   execFileSync("git", ["config", "user.name", "Test"], { cwd: dir });
-
-  const targetPort = randomPort();
-  const baselinePort = randomPort();
 
   // Write a package.json with a START command that uses the fixture server.
   // The fixtures are in the QE agent repo, so we use absolute paths.
@@ -83,7 +74,7 @@ function createBrowserTestRepo(opts: {
     .toString()
     .trim();
 
-  return { dir, baselineRef, targetRef, targetPort, baselinePort };
+  return { dir, baselineRef, targetRef };
 }
 
 function createFakeGateway(): FakeModelGateway {

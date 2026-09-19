@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
+import { getFreePort } from "./helpers/free-port.js";
 import {
   evaluateUrlPolicy,
   isDangerousScheme,
@@ -557,7 +558,7 @@ describe("ManagedProcess", () => {
   });
 
   it("starts a simple HTTP server and detects readiness", async () => {
-    const port = 3200 + Math.floor(Math.random() * 100);
+    const port = await getFreePort();
     managedProcess = new ManagedProcess({
       executable: "node",
       args: ["fixtures/browser-eval/server.cjs"],
@@ -578,7 +579,7 @@ describe("ManagedProcess", () => {
   }, 15_000);
 
   it("stops a running process and frees the port", async () => {
-    const port = 3300 + Math.floor(Math.random() * 100);
+    const port = await getFreePort();
     managedProcess = new ManagedProcess({
       executable: "node",
       args: ["fixtures/browser-eval/server.cjs"],
@@ -598,7 +599,7 @@ describe("ManagedProcess", () => {
   }, 20_000);
 
   it("detects startup failure from crash", async () => {
-    const port = 3400 + Math.floor(Math.random() * 100);
+    const port = await getFreePort();
     managedProcess = new ManagedProcess({
       executable: "node",
       args: ["fixtures/browser-eval/server-crash.cjs"],
@@ -616,7 +617,7 @@ describe("ManagedProcess", () => {
   }, 10_000);
 
   it("detects readiness timeout from hanging server", async () => {
-    const port = 6500 + Math.floor(Math.random() * 100);
+    const port = await getFreePort();
     managedProcess = new ManagedProcess({
       executable: "node",
       args: ["fixtures/browser-eval/server-hang.cjs"],
@@ -633,7 +634,7 @@ describe("ManagedProcess", () => {
   }, 10_000);
 
   it("captures bounded output", async () => {
-    const port = 3600 + Math.floor(Math.random() * 100);
+    const port = await getFreePort();
     managedProcess = new ManagedProcess({
       executable: "node",
       args: ["fixtures/browser-eval/server.cjs"],

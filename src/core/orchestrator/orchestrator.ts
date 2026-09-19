@@ -27,6 +27,7 @@ import {
   createBudgetForProfile,
   VERDICT_TIME_RESERVE_MS,
 } from "./budget-manager.js";
+import { getFreePort } from "./free-port.js";
 import {
   BudgetAwareGateway,
   MIN_MODEL_CALL_TIMEOUT_MS,
@@ -862,7 +863,7 @@ export class QEOrchestrator {
           let effectiveBaseUrl = baseUrl;
 
           if (!effectiveBaseUrl && startCommand) {
-            const port = 3_100 + Math.floor(Math.random() * 900);
+            const port = await getFreePort();
             const processOptions: ManagedProcessOptions = {
               executable:
                 startCommand.executable ?? startCommand.command.split(" ")[0],
