@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { discoverRoot } from "../src/repository/root-discovery.js";
+import {
+  discoverRoot,
+  canonicalize,
+} from "../src/repository/root-discovery.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -39,7 +42,12 @@ describe("discoverRoot path source", () => {
     const result = await discoverRoot(repoDir, { source: "explicit" });
     expect(result.root).toBe(repoDir);
     expect(result.git.detected).toBe(true);
-    expect(result.git.root).toBe(repoDir);
+    // Compare canonical identities, not raw strings: on macOS the Git
+    // root (/private/var/...) and the fixture path (/var/...) are the
+    // same directory under different aliases.
+    expect(await canonicalize(result.git.root!)).toBe(
+      await canonicalize(repoDir),
+    );
   });
 
   it("explicit source does not report a parent git repo as the target", async () => {
@@ -48,7 +56,9 @@ describe("discoverRoot path source", () => {
     const result = await discoverRoot(repoDir, { source: "explicit" });
     expect(result.root).toBe(repoDir);
     expect(result.git.detected).toBe(true);
-    expect(result.git.root).toBe(repoDir);
+    expect(await canonicalize(result.git.root!)).toBe(
+      await canonicalize(repoDir),
+    );
   });
 
   it("inferred source may walk upward to a project marker", async () => {

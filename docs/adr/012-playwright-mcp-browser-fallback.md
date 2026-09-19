@@ -50,23 +50,27 @@ when no local Chromium binary exists.
 5. Safety properties are preserved regardless of adapter: the same action
    validator, URL policy (checked after every state-changing action —
    NAVIGATE, CLICK, FILL, SELECT, CHECK, UNCHECK, PRESS — and before
-   every read/capture), secret redaction, budget enforcement, and
+   every read/capture, including ASSERT_URL; fail closed: an
+   unestablishable current origin denies the read), secret redaction, budget enforcement, and
    artifact-boundary rules (internally generated, sanitized screenshot
    paths confined beneath the QE artifact directory) apply. Evidence
    records the adapter source so verdicts remain explainable.
 
 6. Controlled execution and provisioning. The MCP server is a
-   long-lived stdio child process and cannot flow through the one-shot
-   `ExecutionController.execute`, so it is launched through the
-   dedicated controlled-execution boundary in
-   `src/core/browser/mcp-launcher.ts`, which provides the same
-   properties: an executable allowlist (node/npx only), an
-   implementation allowlist (the provisioned `@playwright/mcp` CLI
-   only), filtered environment, bounded stderr capture, and
-   process-group cleanup. Resolution order: `QE_PLAYWRIGHT_MCP_CLI`
-   operator override → harness settings / npx cache discovery (each
-   entry re-validated against the allowlist) → pinned
-   `npx @playwright/mcp@<pinned> --headless` network default. The
+   long-lived stdio child process. It is spawned through the canonical
+   Execution Controller's managed-process capability
+   (`ExecutionController.spawnManaged`, implemented once in
+   `src/execution/managed-process.ts` beneath both one-shot and managed
+   execution): the same command policy, filtered environment, bounded
+   output, evidence capture, and process-group lifecycle apply, so no
+   policy can drift between the two paths. On top of the controller,
+   `src/core/browser/mcp-launcher.ts` adds the MCP-specific
+   provisioning policy — an executable allowlist (node/npx only) and
+   an implementation allowlist (the provisioned `@playwright/mcp` CLI
+   or the pinned npx package). Resolution order:
+   `QE_PLAYWRIGHT_MCP_CLI` operator override → harness settings / npx
+   cache discovery (each entry re-validated against the allowlist) →
+   pinned `npx @playwright/mcp@<pinned> --headless` network default. The
    default is pinned to an explicit release (never `@latest`). The
    pinned network fallback downloads from the npm registry on first
    use and therefore requires network access at MCP startup; prefer a

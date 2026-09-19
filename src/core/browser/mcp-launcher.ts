@@ -1,27 +1,31 @@
-import { spawn, type ChildProcess } from "node:child_process";
 import { basename } from "node:path";
+import {
+  ExecutionController,
+  type ManagedProcessHandle,
+} from "../../execution/index.js";
 
 /**
  * Controlled-execution boundary for the Playwright MCP server (ADR-012).
  *
- * The MCP server is a long-lived stdio child process, so it cannot flow
- * through the one-shot Execution Controller (`ExecutionController.execute`).
- * Instead it is launched here under the same safety properties:
+ * The MCP server is a long-lived stdio child process. It is spawned
+ * through the canonical Execution Controller
+ * (`ExecutionController.spawnManaged`), which enforces the same command
+ * policy, filtered environment, bounded output, evidence capture, and
+ * process-group lifecycle as one-shot execution — implemented once in
+ * `src/execution/managed-process.ts` beneath both paths so policy
+ * cannot drift.
  *
- * - allowlisted executables only (node / npx / npm);
- * - allowlisted MCP implementation only (pinned `@playwright/mcp` package
- *   or a `.../@playwright/mcp/cli.js` path);
- * - filtered environment (Execution Controller allowlist);
- * - bounded stderr capture;
- * - process-group (detached) spawn with process-tree cleanup helper.
- *
- * Repository-controlled configuration (`browser.mcpCommand` /
- * `browser.mcpArgs` in `.qe/config.yml`) is NEVER honored here — the
- * evaluated repository is untrusted (AGENTS.md "Security"). Only
- * operator-controlled sources (explicit `QE_PLAYWRIGHT_MCP_CLI` env,
- * harness settings / npx cache discovered at runtime, or the pinned
- * network default) may provide an invocation, and every invocation is
- * validated with `validateMcpInvocation` before spawn.
+ * On top of the controller, this module adds the MCP-specific
+ * provisioning policy: an executable allowlist (node/npx only) and an
+ * implementation allowlist (the provisioned `@playwright/mcp` CLI or
+ * the pinned npx package). Repository-controlled configuration
+ * (`browser.mcpCommand` / `browser.mcpArgs` in `.qe/config.yml`) is
+ * NEVER honored here — the evaluated repository is untrusted
+ * (AGENTS.md "Security"). Only operator-controlled sources (explicit
+ * `QE_PLAYWRIGHT_MCP_CLI` env, harness settings / npx cache discovered
+ * at runtime, or the pinned network default) may provide an
+ * invocation, and every invocation is validated with
+ * `validateMcpInvocation` before reaching the controller.
  */
 
 /** Pinned @playwright/mcp release. No `latest` tag — supply-chain pin. */
@@ -96,127 +100,47 @@ export function validateMcpInvocation(command: string, args: string[]): void {
   }
 }
 
-const SAFE_ENV_VARS = new Set([
-  "PATH",
-  "HOME",
-  "USER",
-  "LOGNAME",
-  "SHELL",
-  "TERM",
-  "LANG",
-  "LC_ALL",
-  "LC_CTYPE",
-  "TMPDIR",
-  "TMP",
-  "TEMP",
-  "HOSTNAME",
-  "EDITOR",
-  "VISUAL",
-  "PAGER",
-  "SYSTEMROOT",
-  "COMSPEC",
-  "WINDIR",
-  "PROGRAMFILES",
-  "APPDATA",
-  "LOCALAPPDATA",
-  "HOMEDRIVE",
-  "HOMEPATH",
-  "USERPROFILE",
-  "XDG_RUNTIME_DIR",
-  "XDG_DATA_HOME",
-  "XDG_CONFIG_HOME",
-  "XDG_CACHE_HOME",
-]);
-
-function filteredEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
-  const env: Record<string, string | undefined> = {};
-  for (const key of SAFE_ENV_VARS) {
-    if (process.env[key] !== undefined) env[key] = process.env[key];
-  }
-  if (extra) {
-    for (const [k, v] of Object.entries(extra)) env[k] = v;
-  }
-  return env as NodeJS.ProcessEnv;
-}
-
 export interface ControlledMcpSpawnOptions {
   command: string;
   args: string[];
   cwd?: string;
+  /** Canonical Execution Controller — the MCP server flows through it. */
+  controller: ExecutionController;
+  /** Repository root the execution policy confines the server to. */
+  repositoryRoot: string;
+  secrets?: string[];
+  /** Startup/handshake budget, carried as the proposal timeout. */
+  startupTimeoutMs?: number;
   /** Max stderr bytes retained for diagnostics (default 64 KiB). */
   maxStderrBytes?: number;
 }
 
 /**
- * Spawn the MCP server after validating the invocation. Returns the
- * child process plus a bounded stderr collector. The child is spawned
- * detached so `killMcpProcessTree` can terminate the whole group.
+ * Validate the invocation, then spawn the MCP server via the
+ * Execution Controller's managed-process capability. The working
+ * directory defaults to the repository root so command policy (which
+ * confines execution inside the root) is satisfied; an explicit cwd
+ * outside the root fails closed at the controller boundary.
  */
-export function launchControlledMcp(options: ControlledMcpSpawnOptions): {
-  proc: ChildProcess;
-  stderrTail: () => string;
-} {
+export async function launchControlledMcp(
+  options: ControlledMcpSpawnOptions,
+): Promise<ManagedProcessHandle> {
   validateMcpInvocation(options.command, options.args);
-  const proc = spawn(options.command, options.args, {
-    cwd: options.cwd,
-    stdio: ["pipe", "pipe", "pipe"],
-    env: filteredEnv(),
-    shell: false,
-    detached: true,
-  });
-  const maxBytes = options.maxStderrBytes ?? 65536;
-  const chunks: Buffer[] = [];
-  let total = 0;
-  proc.stderr?.on("data", (chunk: Buffer) => {
-    chunks.push(chunk);
-    total += chunk.length;
-    while (total > maxBytes && chunks.length > 0) {
-      const first = chunks.shift()!;
-      total -= first.length;
-    }
-  });
-  return {
-    proc,
-    stderrTail: () => Buffer.concat(chunks).toString("utf-8"),
-  };
-}
-
-/** Terminate an MCP process tree: SIGTERM the group, then SIGKILL. */
-export async function killMcpProcessTree(
-  proc: ChildProcess,
-  graceMs = 2000,
-): Promise<void> {
-  if (!proc.pid) {
-    try {
-      proc.kill("SIGKILL");
-    } catch {
-      // already dead
-    }
-    return;
-  }
-  try {
-    process.kill(-proc.pid, "SIGTERM");
-  } catch {
-    try {
-      proc.kill("SIGTERM");
-    } catch {
-      // already dead
-    }
-  }
-  const exited = await Promise.race([
-    new Promise<boolean>((resolve) => {
-      proc.once("exit", () => resolve(true));
-    }),
-    new Promise<boolean>((resolve) =>
-      setTimeout(() => resolve(false), graceMs),
-    ),
-  ]);
-  if (!exited) {
-    try {
-      if (proc.pid) process.kill(-proc.pid, "SIGKILL");
-      else proc.kill("SIGKILL");
-    } catch {
-      // already dead
-    }
-  }
+  return options.controller.spawnManaged(
+    {
+      executable: options.command,
+      args: options.args,
+      workingDirectory: options.cwd ?? options.repositoryRoot,
+      timeoutMs: options.startupTimeoutMs ?? 15_000,
+      purpose: "Playwright MCP browser server (ADR-012)",
+      mutability: "TEST_ARTIFACTS",
+      network: "ALLOWED",
+    },
+    {
+      repositoryRoot: options.repositoryRoot,
+      executionMode: "local",
+      secrets: options.secrets ?? [],
+      maxOutputBytes: 1_048_576,
+    },
+  );
 }

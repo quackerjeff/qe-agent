@@ -54,7 +54,14 @@ export async function detectInstalledPlaywrightMcp(): Promise<{
   if (envCli) {
     try {
       await access(envCli, constants.R_OK);
-      return { command: process.execPath, args: [envCli, "--headless"] };
+      // Operator input is still validated: a non-provisioned path falls
+      // through to discovery rather than reaching the adapter.
+      try {
+        validateMcpInvocation(process.execPath, [envCli]);
+        return { command: process.execPath, args: [envCli, "--headless"] };
+      } catch {
+        // not the provisioned CLI — fall through to discovery
+      }
     } catch {
       // configured but not readable — fall through to discovery
     }

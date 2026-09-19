@@ -1,10 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { z } from "zod";
-import type {
-  ModelGateway,
-  ModelResult,
-  ReasoningTask,
-} from "../src/models/gateway/types.js";
 import {
   buildKiroReasoningPrompt,
   KiroModelGateway,

@@ -365,6 +365,13 @@ export class PlaywrightAdapter implements BrowserCapability {
         }
 
         case "ASSERT_URL": {
+          const preCheck = this.verifyPostActionUrl(page, context);
+          if (preCheck)
+            return {
+              ...preCheck,
+              action,
+              durationMs: Date.now() - startTime,
+            };
           const currentUrl = page.url();
           const expected = action.url ?? action.value ?? "";
           const pass = currentUrl.includes(expected);

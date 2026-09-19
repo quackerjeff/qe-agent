@@ -215,7 +215,10 @@ describe("detectInstalledPlaywrightMcp env override", () => {
   it("uses QE_PLAYWRIGHT_MCP_CLI when set and readable", async () => {
     const dir = await mkdtemp(join(tmpdir(), "qe-mcpenv-"));
     try {
-      const cliPath = join(dir, "cli.js");
+      // Provisioned layout so the allowlist accepts the override.
+      const cliDir = join(dir, "node_modules", "@playwright", "mcp");
+      await mkdir(cliDir, { recursive: true });
+      const cliPath = join(cliDir, "cli.js");
       await writeFile(cliPath, "#!/usr/bin/env node\n", "utf-8");
       process.env.QE_PLAYWRIGHT_MCP_CLI = cliPath;
 
@@ -224,6 +227,20 @@ describe("detectInstalledPlaywrightMcp env override", () => {
       expect(detected!.command).toBe(process.execPath);
       expect(detected!.args[0]).toBe(cliPath);
       expect(detected!.args).toContain("--headless");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls through when QE_PLAYWRIGHT_MCP_CLI is not the provisioned CLI", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "qe-mcpenv-"));
+    try {
+      const cliPath = join(dir, "other-cli.js");
+      await writeFile(cliPath, "#!/usr/bin/env node\n", "utf-8");
+      process.env.QE_PLAYWRIGHT_MCP_CLI = cliPath;
+      // Discovery home is nonexistent and the override is rejected,
+      // so nothing is found.
+      expect(await detectInstalledPlaywrightMcp()).toBeNull();
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
