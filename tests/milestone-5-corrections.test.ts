@@ -1,3 +1,4 @@
+import { getFreePort } from "./helpers/free-port.js";
 import { describe, it, expect, afterEach } from "vitest";
 import { PlaywrightAdapter } from "../src/core/browser/playwright-adapter.js";
 import { ManagedProcess } from "../src/core/browser/managed-process.js";
@@ -8,10 +9,6 @@ import type {
 } from "../src/core/browser/types.js";
 
 const TEST_TIMEOUT = 30_000;
-
-function randomPort(): number {
-  return 5100 + Math.floor(Math.random() * 900);
-}
 
 function makeContext(
   port: number,
@@ -54,7 +51,7 @@ describe("Correction 1 — URL Policy Enforcement", () => {
   it(
     "1A: direct external NAVIGATE is POLICY_DENIED",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -91,7 +88,7 @@ describe("Correction 1 — URL Policy Enforcement", () => {
   it(
     "1B: local URL redirecting to external is denied",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -136,7 +133,7 @@ describe("Correction 1 — URL Policy Enforcement", () => {
   it(
     "1C: clicking external link is denied",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -177,7 +174,7 @@ describe("Correction 1 — URL Policy Enforcement", () => {
   it(
     "1D: script-driven window.location to external is denied",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -217,7 +214,7 @@ describe("Correction 1 — URL Policy Enforcement", () => {
   it(
     "1E: form with external action is denied",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -264,7 +261,7 @@ describe("Correction 1 — URL Policy Enforcement", () => {
   it(
     "1F: popup to external origin is denied/closed",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -315,7 +312,7 @@ describe("Correction 1 — URL Policy Enforcement", () => {
   it(
     "1G: explicitly allowlisted origin is allowed",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -370,7 +367,7 @@ describe("Correction 2 — Secret Redaction", () => {
   it(
     "ASSERT_VALUE does not expose secret value",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -433,7 +430,7 @@ describe("Correction 2 — Secret Redaction", () => {
   it(
     "console and page error evidence redacts secrets",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -490,7 +487,7 @@ describe("Correction 2 — Secret Redaction", () => {
   it(
     "secret repeated multiple times is fully redacted",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -593,7 +590,7 @@ describe("Correction 4 — Canonical Browser Baseline Comparison", () => {
     "baseline PASS + target FAIL produces INTRODUCED with separate evidence IDs",
     async () => {
       // Target: regression mode (FAIL)
-      const targetPort = randomPort();
+      const targetPort = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -634,7 +631,7 @@ describe("Correction 4 — Canonical Browser Baseline Comparison", () => {
       await adapter.cleanup();
 
       // Baseline: passing mode (PASS)
-      const basePort = randomPort();
+      const basePort = await getFreePort();
       baselineProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -698,7 +695,7 @@ describe("Correction 4 — Canonical Browser Baseline Comparison", () => {
   it(
     "baseline FAIL + target FAIL produces PRE_EXISTING",
     async () => {
-      const targetPort = randomPort();
+      const targetPort = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -758,8 +755,8 @@ describe("Correction 4 — Canonical Browser Baseline Comparison", () => {
   it(
     "target and baseline use different ports",
     async () => {
-      const targetPort = randomPort();
-      const basePort = randomPort();
+      const targetPort = await getFreePort();
+      const basePort = await getFreePort();
       expect(targetPort).not.toBe(basePort);
 
       managedProcess = new ManagedProcess({
@@ -813,7 +810,7 @@ describe("Correction 6 — Process Tree Cleanup", () => {
   it(
     "app with child process: descendants terminate on stop",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       const mp = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server-with-child.cjs"],
@@ -847,7 +844,7 @@ describe("Correction 6 — Process Tree Cleanup", () => {
   it(
     "process cleanup after readiness timeout",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       const mp = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server-hang.cjs"],
@@ -869,7 +866,7 @@ describe("Correction 6 — Process Tree Cleanup", () => {
   it(
     "process cleanup after startup failure",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       const mp = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server-crash.cjs"],
@@ -899,7 +896,7 @@ describe("Correction 7 — Existing-App Safety", () => {
     "existing-app mode does not terminate external process",
     async () => {
       // Start an "existing" app ourselves (simulating user's app)
-      const port = randomPort();
+      const port = await getFreePort();
       const existingApp = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -971,7 +968,7 @@ describe("Correction 8 — Evidence Truthfulness", () => {
   it(
     "policy-denied action never produces PASS status",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],
@@ -1035,7 +1032,7 @@ describe("Correction 10 — Prompt Injection Re-verification", () => {
   it(
     "page with injection text cannot bypass URL or write policy",
     async () => {
-      const port = randomPort();
+      const port = await getFreePort();
       managedProcess = new ManagedProcess({
         executable: "node",
         args: ["fixtures/browser-eval/server.cjs"],

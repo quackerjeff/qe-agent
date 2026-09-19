@@ -365,20 +365,32 @@ describe("CompositeBrowserCapability", () => {
   });
 
   it("composite with real PlaywrightAdapter falls back when local browser is missing", async () => {
-    // On a server without Chromium this exercises the real fallback path.
-    // chromium.launch() probes the host for a browser binary, which is
-    // slow under full-suite load — allow a generous budget so this test
-    // is deterministic regardless of suite ordering/parallelism.
-    const composite = new CompositeBrowserCapability(
-      new PlaywrightAdapter(),
-      new FakeCapability("pass"),
-    );
-    const result = await composite.executeScenario(
-      makeScenario(),
-      makeContext(),
-    );
-    // Either local Chromium worked (PASS) or the fallback ran (PASS).
-    expect(result.status).toBe("PASS");
-    await composite.cleanup();
+    // Deterministically simulate a browserless host with the REAL
+    // adapter: point Playwright's browser registry at an empty
+    // directory so chromium.launch() fails with ENVIRONMENT_ISSUE on
+    // every machine, whether or not a browser is installed. The test
+    // then exercises the genuine fallback decision instead of
+    // depending on host state to be meaningful.
+    const emptyRegistry = await mkdtemp(join(tmpdir(), "qe-no-browsers-"));
+    const realRegistry = process.env.PLAYWRIGHT_BROWSERS_PATH;
+    process.env.PLAYWRIGHT_BROWSERS_PATH = emptyRegistry;
+    try {
+      const composite = new CompositeBrowserCapability(
+        new PlaywrightAdapter(),
+        new FakeCapability("pass"),
+      );
+      const result = await composite.executeScenario(
+        makeScenario(),
+        makeContext(),
+      );
+      // Local launch failed (environment) so the fallback ran (PASS).
+      expect(result.status).toBe("PASS");
+      await composite.cleanup();
+    } finally {
+      if (realRegistry === undefined)
+        delete process.env.PLAYWRIGHT_BROWSERS_PATH;
+      else process.env.PLAYWRIGHT_BROWSERS_PATH = realRegistry;
+      await rm(emptyRegistry, { recursive: true, force: true });
+    }
   }, 60_000);
 });
