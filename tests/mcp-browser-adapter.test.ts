@@ -34,7 +34,17 @@ rl.on("line", (line) => {
     if (name === "browser_navigate") {
       send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "Navigated to " + msg.params.arguments.url }] } });
     } else if (name === "browser_evaluate") {
-      send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: JSON.stringify({ result: "http://localhost:3210/page" }) }] } });
+      // Match the real Playwright MCP output format observed live: a
+      // formatted block wrapping the JSON-encoded result. The fake server
+      // script is itself a template literal, so escape newlines for both
+      // layers.
+      const text =
+        '### Result\\n"http://localhost:3210/page"\\n\\n### Ran Playwright code\\nawait page.evaluate';
+      send({
+        jsonrpc: "2.0",
+        id: msg.id,
+        result: { content: [{ type: "text", text }] },
+      });
     } else if (name === "browser_snapshot") {
       send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "Welcome to the app [ref=btn1][button]Submit[/button]" }] } });
     } else {
