@@ -11,12 +11,21 @@ import { basename } from "node:path";
 export interface AnalyzeOptions {
   targetPath: string;
   adapters?: EcosystemAdapter[];
+  /**
+   * "explicit" when the caller (e.g. a --repo flag) authoritatively
+   * selected this path; "inferred" when it was derived from the
+   * environment (cwd). Controls root-discovery behavior — see
+   * discoverRoot.
+   */
+  pathSource?: "explicit" | "inferred";
 }
 
 export async function analyzeRepository(
   options: AnalyzeOptions,
 ): Promise<RepositoryProfile> {
-  const { root, git } = await discoverRoot(options.targetPath);
+  const { root, git } = await discoverRoot(options.targetPath, {
+    source: options.pathSource ?? "inferred",
+  });
   const { inventory, nestedProjectPaths } = await buildFileInventory(root);
 
   const adapters = options.adapters ?? createDefaultAdapters();

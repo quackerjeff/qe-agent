@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, constants, stat } from "node:fs/promises";
+import { access, constants, realpath, stat } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { promisify } from "node:util";
 import type { GitInfo } from "../types/index.js";
@@ -10,6 +10,9 @@ const PROJECT_MARKERS = [
   "package.json",
   "pyproject.toml",
   "setup.py",
+  "setup.cfg",
+  "requirements.txt",
+  "pytest.ini",
   "Cargo.toml",
   "go.mod",
   "pom.xml",
@@ -26,13 +29,51 @@ export interface RootDiscoveryResult {
   git: GitInfo;
 }
 
+export interface RootDiscoveryOptions {
+  /**
+   * How the target path was determined. This distinguishes the two
+   * supported invocation styles:
+   *
+   * - "explicit" — the user supplied the repository path (e.g. `--repo`).
+   *   That path is the authoritative root; the search never escapes above
+   *   it (stray project markers in parent directories must not hijack
+   *   the analysis target).
+   * - "inferred" (default) — the path was derived from the environment
+   *   (e.g. cwd in a local terminal or inside a GitHub Actions runner,
+   *   where the checkout may sit below the project root). The search may
+   *   walk upward to find the nearest project marker or git root.
+   */
+  source?: "explicit" | "inferred";
+}
+
 export async function discoverRoot(
   targetPath: string,
+  options: RootDiscoveryOptions = {},
 ): Promise<RootDiscoveryResult> {
+  const explicit = options.source === "explicit";
   const absolutePath = resolve(targetPath);
   await access(absolutePath, constants.R_OK);
 
   const git = await detectGit(absolutePath);
+
+  if (explicit) {
+    // An explicitly given repository path is the root, full stop. Git
+    // metadata may still be reported, but only when its root matches the
+    // given path (a parent repo must not swallow the target). Both
+    // sides are canonicalized with realpath so equivalent path aliases
+    // (e.g. /var/... vs /private/var/... on macOS, symlinked tmpdirs)
+    // compare equal.
+    if (git.detected && git.root) {
+      const [canonicalInput, canonicalGitRoot] = await Promise.all([
+        canonicalize(absolutePath),
+        canonicalize(git.root),
+      ]);
+      if (canonicalGitRoot === canonicalInput) {
+        return { root: absolutePath, git };
+      }
+    }
+    return { root: absolutePath, git: { detected: false } };
+  }
 
   const projectRoot = await findNearestProjectRoot(absolutePath);
   if (projectRoot) {
@@ -108,5 +149,18 @@ async function detectGit(path: string): Promise<GitInfo> {
     return { detected: true, root: root.trim(), branch };
   } catch {
     return { detected: false };
+  }
+}
+
+/**
+ * Canonicalize a path for identity comparison (symlinks, /var vs
+ * /private/var aliases, tmpdir indirection). Falls back to the
+ * resolved input when the path does not exist.
+ */
+export async function canonicalize(p: string): Promise<string> {
+  try {
+    return await realpath(p);
+  } catch {
+    return resolve(p);
   }
 }

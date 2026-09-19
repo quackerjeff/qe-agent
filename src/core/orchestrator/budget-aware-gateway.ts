@@ -63,6 +63,14 @@ export interface BudgetAwareGatewayOptions {
   modelTokenLimit?: number;
   tpmLimit?: number;
   tpmWindowMs?: number;
+  /**
+   * Per-call response-token floor. When set, every task's maxTokens is
+   * raised to at least this value (never lowered). Reasoning models
+   * consume hidden thinking tokens from the response budget, so prompt-
+   * defined ceilings that assume non-reasoning models can truncate
+   * structured output to zero visible content.
+   */
+  minResponseTokens?: number;
   sleepFn?: (ms: number) => Promise<void>;
 }
 
@@ -92,6 +100,7 @@ export class BudgetAwareGateway implements ModelGateway {
   private readonly modelTokenLimit?: number;
   private readonly tpmLimit?: number;
   private readonly tpmWindowMs: number;
+  private readonly minResponseTokens?: number;
   private readonly sleepFn: (ms: number) => Promise<void>;
   private readonly dispatchRecords: DispatchRecord[] = [];
   private latestRateLimitInfo?: ProviderRateLimitInfo;
@@ -111,6 +120,7 @@ export class BudgetAwareGateway implements ModelGateway {
       this.modelTokenLimit = options?.modelTokenLimit;
       this.tpmLimit = options?.tpmLimit;
       this.tpmWindowMs = options?.tpmWindowMs ?? DEFAULT_TPM_WINDOW_MS;
+      this.minResponseTokens = options?.minResponseTokens;
       this.sleepFn = options?.sleepFn ?? defaultSleep;
     }
   }
@@ -123,7 +133,21 @@ export class BudgetAwareGateway implements ModelGateway {
     let lastError: Error | undefined;
     let retryCount = 0;
 
+    // Config-driven response-token floor: raise, never lower. Reasoning
+    // models consume hidden thinking tokens from the response budget;
+    // prompt-defined ceilings assume non-reasoning models and can
+    // truncate structured output to zero visible content.
+    const configuredFloor = this.minResponseTokens;
+    if (
+      configuredFloor !== undefined &&
+      (task.maxTokens ?? DEFAULT_MAX_RESPONSE_TOKENS) < configuredFloor
+    ) {
+      task = { ...task, maxTokens: configuredFloor };
+    }
+
     let maxResponse = task.maxTokens ?? DEFAULT_MAX_RESPONSE_TOKENS;
+    let effectiveTask = task;
+
     if (maxResponse > this.maxResponseTokensSeen) {
       this.maxResponseTokensSeen = maxResponse;
     }
@@ -133,8 +157,6 @@ export class BudgetAwareGateway implements ModelGateway {
     let estimatedDemand = contextEstimate + maxResponse;
 
     this.totalEstimatedDemand += estimatedDemand;
-
-    let effectiveTask = task;
 
     // Phase 1: Context-window admission
     if (this.modelTokenLimit && estimatedDemand > this.modelTokenLimit) {

@@ -23,6 +23,7 @@ import { persistResult } from "../github/reporter.js";
 import { getCiExitCode } from "../github/verdict.js";
 import type { Verdict } from "../types/domain.js";
 import { writeSafeResultOutput } from "./output-path.js";
+import { createBrowserCapability } from "./browser-factory.js";
 
 export interface ReviewCommandOptions {
   base?: string;
@@ -175,8 +176,16 @@ export async function runReview(
     gateway,
     logger: effectiveLogger,
     maxModelCalls: explicitMaxModelCalls,
+    minResponseTokens: config.reasoning.maxOutputTokens,
     modelTokenLimit: resolveModelTokenLimit(config),
     tpmLimit: resolveModelTpmLimit(config),
+    browserCapability: await createBrowserCapability(config),
+    browserConfig: {
+      enabled: config.browser.enabled,
+      baseUrl: config.browser.baseUrl,
+      allowedOrigins: config.browser.allowedOrigins,
+      headless: config.browser.headless,
+    },
     memoryConfig: {
       enabled: config.memory.enabled,
       historySummaries: config.memory.historySummaries,
@@ -185,6 +194,7 @@ export async function runReview(
 
   const request: QERequest = {
     repositoryPath: repoPath,
+    pathSource: options.repo ? "explicit" : "inferred",
     requirements: requirements.length > 0 ? requirements : undefined,
     baselineRef: options.base,
     targetRef: options.target,

@@ -1,4 +1,4 @@
-export { discoverRoot } from "./root-discovery.js";
+export { discoverRoot, canonicalize } from "./root-discovery.js";
 export type { RootDiscoveryResult } from "./root-discovery.js";
 export { buildFileInventory } from "./file-inventory.js";
 export type {

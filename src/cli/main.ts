@@ -11,6 +11,40 @@ import { runExec } from "./exec.js";
 import { runVerify } from "./verify.js";
 import { runReview } from "./review.js";
 import { runGitHubPublish } from "./github-publish.js";
+import { runOpenCodePublish } from "./opencode-publish.js";
+
+/**
+ * Load a git-ignored .env file (KEY=VALUE lines) from the repository root
+ * so that addresses, keys, and model names never need to be committed
+ * (see AGENTS.md security rules). Existing environment variables always
+ * take precedence. No dependency — plain parsing of simple KEY=VALUE lines.
+ */
+async function loadLocalEnv(): Promise<void> {
+  const cwd = process.cwd();
+  const envPath = join(cwd, ".env");
+  try {
+    const text = await readFile(envPath, "utf-8");
+    for (const rawLine of text.split("\n")) {
+      const line = rawLine.trim();
+      if (line.length === 0 || line.startsWith("#")) continue;
+      const eq = line.indexOf("=");
+      if (eq <= 0) continue;
+      const key = line.slice(0, eq).trim();
+      let value = line.slice(eq + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (process.env[key] === undefined) {
+        process.env[key] = value;
+      }
+    }
+  } catch {
+    // No .env file — nothing to do
+  }
+}
 
 async function getVersion(): Promise<string> {
   const __filename = fileURLToPath(import.meta.url);
@@ -25,6 +59,7 @@ async function getVersion(): Promise<string> {
 }
 
 async function main(): Promise<void> {
+  await loadLocalEnv();
   const version = await getVersion();
   const program = new Command();
 
@@ -154,6 +189,30 @@ async function main(): Promise<void> {
       } catch (err) {
         logger.error(
           err instanceof Error ? err.message : "GitHub publish failed",
+        );
+        process.exit(1);
+      }
+    });
+
+  const opencode = program
+    .command("opencode")
+    .description("OpenCode harness integration commands");
+
+  opencode
+    .command("publish")
+    .description("Publish QE result to an OpenCode session")
+    .requiredOption("--result <path>", "Path to QE result JSON file")
+    .option("--repo <path>", "Repository path (default: cwd)")
+    .option("--session <id>", "OpenCode session ID to deliver into")
+    .option("--dry-run", "Preview delivery without sending")
+    .option("--json", "Output publishing result as JSON")
+    .action(async (opts) => {
+      const logger = createLogger("INFO");
+      try {
+        await runOpenCodePublish(opts, logger);
+      } catch (err) {
+        logger.error(
+          err instanceof Error ? err.message : "OpenCode publish failed",
         );
         process.exit(1);
       }

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md"],
+  "permission": {
+    "edit": "ask"
+  },
+  "command": {
+    "qe": {
+      "template": "Run the QE Agent change review against the main branch baseline and report the verdict with evidence.",
+      "description": "Quick QE review against main",
+      "agent": "qe",
+      "subtask": true
+    }
+  }
+}

@@ -2,6 +2,10 @@ import { createExecutionId } from "../logging/index.js";
 import type { Evidence } from "../types/index.js";
 import type { Logger } from "../logging/index.js";
 import { evaluatePolicy } from "./policy.js";
+import {
+  spawnManagedProcess,
+  type ManagedProcessHandle,
+} from "./managed-process.js";
 import { createExecutionEvidence } from "./evidence-factory.js";
 import { redactSecrets, redactArgs } from "./secret-redactor.js";
 import type { EvidenceStore } from "./evidence-store.js";
@@ -88,6 +92,54 @@ export class ExecutionController {
     await this.evidenceStore.add(evidence);
 
     return { result, evidence };
+  }
+
+  /**
+   * Spawn a managed long-lived process (e.g. the Playwright MCP
+   * server) through the canonical Execution Controller.
+   *
+   * This is the managed counterpart to execute(): the same command
+   * policy, filtered environment, bounded output, and process-group
+   * lifecycle enforcement apply — implemented once in
+   * `spawnManagedProcess` beneath both paths so policy cannot drift.
+   * Denials are recorded as evidence and surfaced as thrown errors
+   * (fail closed); the caller owns the returned handle and must
+   * terminate it via `killTree()` (see McpPlaywrightAdapter.cleanup).
+   */
+  async spawnManaged(
+    proposal: CommandProposal,
+    context: ExecutionContext,
+  ): Promise<ManagedProcessHandle> {
+    const secrets = context.secrets;
+    const safeExec = redactSecrets(proposal.executable, secrets);
+    const safeArgs = redactArgs(proposal.args, secrets);
+
+    this.logger?.info(
+      `Spawning managed process: ${safeExec} ${safeArgs.join(" ")}`,
+      {
+        purpose: proposal.purpose,
+      },
+    );
+
+    let handle: ManagedProcessHandle;
+    try {
+      handle = spawnManagedProcess(proposal, context);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      this.logger?.warn(
+        `Managed process denied/failed: ${redactSecrets(reason, secrets)}`,
+      );
+      const result = createDeniedResult(proposal, reason, secrets);
+      const evidence = createExecutionEvidence(result);
+      await this.evidenceStore.add(evidence);
+      throw err;
+    }
+
+    this.logger?.debug(`Managed process started (pid=${handle.proc.pid})`, {
+      purpose: proposal.purpose,
+    });
+
+    return handle;
   }
 
   getEvidenceStore(): EvidenceStore {

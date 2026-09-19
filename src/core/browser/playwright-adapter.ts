@@ -202,6 +202,13 @@ export class PlaywrightAdapter implements BrowserCapability {
         case "FILL": {
           const locator = this.resolveSelector(page, action.selector!);
           await locator.fill(action.value!, { timeout });
+          const postResult = this.verifyPostActionUrl(page, context);
+          if (postResult)
+            return {
+              ...postResult,
+              action: this.redactActionSecrets(action, context.secrets),
+              durationMs: Date.now() - startTime,
+            };
           return {
             action: this.redactActionSecrets(action, context.secrets),
             status: "PASS",
@@ -213,6 +220,13 @@ export class PlaywrightAdapter implements BrowserCapability {
         case "SELECT": {
           const locator = this.resolveSelector(page, action.selector!);
           await locator.selectOption(action.value!, { timeout });
+          const postResult = this.verifyPostActionUrl(page, context);
+          if (postResult)
+            return {
+              ...postResult,
+              action,
+              durationMs: Date.now() - startTime,
+            };
           return {
             action,
             status: "PASS",
@@ -224,6 +238,13 @@ export class PlaywrightAdapter implements BrowserCapability {
         case "CHECK": {
           const locator = this.resolveSelector(page, action.selector!);
           await locator.check({ timeout });
+          const postResult = this.verifyPostActionUrl(page, context);
+          if (postResult)
+            return {
+              ...postResult,
+              action,
+              durationMs: Date.now() - startTime,
+            };
           return {
             action,
             status: "PASS",
@@ -235,6 +256,13 @@ export class PlaywrightAdapter implements BrowserCapability {
         case "UNCHECK": {
           const locator = this.resolveSelector(page, action.selector!);
           await locator.uncheck({ timeout });
+          const postResult = this.verifyPostActionUrl(page, context);
+          if (postResult)
+            return {
+              ...postResult,
+              action,
+              durationMs: Date.now() - startTime,
+            };
           return {
             action,
             status: "PASS",
@@ -250,6 +278,13 @@ export class PlaywrightAdapter implements BrowserCapability {
           } else {
             await page.keyboard.press(action.key!);
           }
+          const postResult = this.verifyPostActionUrl(page, context);
+          if (postResult)
+            return {
+              ...postResult,
+              action,
+              durationMs: Date.now() - startTime,
+            };
           return {
             action,
             status: "PASS",
@@ -259,6 +294,13 @@ export class PlaywrightAdapter implements BrowserCapability {
         }
 
         case "ASSERT_TEXT": {
+          const preCheck = this.verifyPostActionUrl(page, context);
+          if (preCheck)
+            return {
+              ...preCheck,
+              action,
+              durationMs: Date.now() - startTime,
+            };
           const locator = this.resolveSelector(page, action.selector!);
           const actualText = await locator
             .textContent({ timeout })
@@ -281,6 +323,13 @@ export class PlaywrightAdapter implements BrowserCapability {
         }
 
         case "ASSERT_VISIBLE": {
+          const preCheck = this.verifyPostActionUrl(page, context);
+          if (preCheck)
+            return {
+              ...preCheck,
+              action,
+              durationMs: Date.now() - startTime,
+            };
           const locator = this.resolveSelector(page, action.selector!);
           const visible = await locator
             .isVisible({ timeout })
@@ -296,6 +345,13 @@ export class PlaywrightAdapter implements BrowserCapability {
         }
 
         case "ASSERT_HIDDEN": {
+          const preCheck = this.verifyPostActionUrl(page, context);
+          if (preCheck)
+            return {
+              ...preCheck,
+              action,
+              durationMs: Date.now() - startTime,
+            };
           const locator = this.resolveSelector(page, action.selector!);
           const visible = await locator.isVisible().catch(() => false);
           return {
@@ -309,6 +365,13 @@ export class PlaywrightAdapter implements BrowserCapability {
         }
 
         case "ASSERT_URL": {
+          const preCheck = this.verifyPostActionUrl(page, context);
+          if (preCheck)
+            return {
+              ...preCheck,
+              action,
+              durationMs: Date.now() - startTime,
+            };
           const currentUrl = page.url();
           const expected = action.url ?? action.value ?? "";
           const pass = currentUrl.includes(expected);
@@ -323,6 +386,13 @@ export class PlaywrightAdapter implements BrowserCapability {
         }
 
         case "ASSERT_VALUE": {
+          const preCheck = this.verifyPostActionUrl(page, context);
+          if (preCheck)
+            return {
+              ...preCheck,
+              action,
+              durationMs: Date.now() - startTime,
+            };
           const locator = this.resolveSelector(page, action.selector!);
           const actualValue = await locator
             .inputValue({ timeout })
@@ -360,6 +430,13 @@ export class PlaywrightAdapter implements BrowserCapability {
         }
 
         case "SCREENSHOT": {
+          const preCheck = this.verifyPostActionUrl(page, context);
+          if (preCheck)
+            return {
+              ...preCheck,
+              action,
+              durationMs: Date.now() - startTime,
+            };
           if (this.screenshotsTaken >= context.budget.maxScreenshots) {
             return this.skippedResult(action, "Screenshot budget exceeded");
           }

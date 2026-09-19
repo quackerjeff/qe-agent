@@ -1,6 +1,18 @@
 export type { BrowserCapability } from "./capability.js";
 export { PlaywrightAdapter } from "./playwright-adapter.js";
 export {
+  McpPlaywrightAdapter,
+  type McpPlaywrightOptions,
+} from "./mcp-playwright-adapter.js";
+export {
+  validateMcpInvocation,
+  launchControlledMcp,
+  PINNED_PLAYWRIGHT_MCP_VERSION,
+  PINNED_MCP_PACKAGE,
+} from "./mcp-launcher.js";
+export { CompositeBrowserCapability } from "./composite.js";
+export { executeScenarioActions } from "./scenario-executor.js";
+export {
   ManagedProcess,
   type ManagedProcessOptions,
   type ManagedProcessResult,

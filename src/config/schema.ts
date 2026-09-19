@@ -30,6 +30,12 @@ export const QEConfigSchema = z.object({
   browser: z
     .object({
       enabled: z.union([z.literal("auto"), z.boolean()]).default("auto"),
+      adapter: z.enum(["auto", "local", "mcp"]).default("auto"),
+      // Legacy keys: accepted so old configs still parse, but IGNORED
+      // at runtime — repository config must not select executables
+      // (ADR-012). The MCP server is operator-provisioned.
+      mcpCommand: z.string().optional(),
+      mcpArgs: z.array(z.string()).optional(),
       baseUrl: z.string().optional(),
       allowedOrigins: z.array(z.string()).optional(),
       headless: z.boolean().default(true),
@@ -79,6 +85,15 @@ export const QEConfigSchema = z.object({
     })
     .default({}),
 
+  opencode: z
+    .object({
+      // Deliver QE summaries into an OpenCode session (ADR-011).
+      messageEnabled: z.boolean().default(true),
+      toastEnabled: z.boolean().default(true),
+      dryRun: z.boolean().default(false),
+    })
+    .default({}),
+
   memory: z
     .object({
       enabled: z.boolean().default(true),
@@ -90,6 +105,9 @@ export const QEConfigSchema = z.object({
     .object({
       provider: z.string().default("openai"),
       model: z.string().default("gpt-4o"),
+      // OpenAI-compatible base URL (local llama.cpp/llama-swap, ollama,
+      // vLLM, ...). When unset, the provider SDK default is used.
+      baseUrl: z.string().url().optional(),
       tokenLimit: z.number().positive().optional(),
       tpmLimit: z.number().positive().optional(),
     })
@@ -98,6 +116,15 @@ export const QEConfigSchema = z.object({
   reasoning: z
     .object({
       maxModelCalls: z.number().positive().default(12),
+      /**
+       * Per-call response token ceiling. Prompt-defined values are the
+       * minimum; this raises them uniformly — required for reasoning
+       * models where hidden thinking tokens count against the response
+       * budget, and for large structured outputs (gap analysis,
+       * test generation) that would otherwise truncate. No ceiling is
+       * imposed when unset.
+       */
+      maxOutputTokens: z.number().positive().optional(),
     })
     .default({}),
 });

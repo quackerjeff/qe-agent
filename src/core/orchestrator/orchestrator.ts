@@ -27,6 +27,7 @@ import {
   createBudgetForProfile,
   VERDICT_TIME_RESERVE_MS,
 } from "./budget-manager.js";
+import { getFreePort } from "./free-port.js";
 import {
   BudgetAwareGateway,
   MIN_MODEL_CALL_TIMEOUT_MS,
@@ -109,6 +110,12 @@ export interface QEOrchestratorOptions {
   gateway: ModelGateway;
   logger?: Logger;
   maxModelCalls?: number;
+  /**
+   * Per-call response-token floor from config (reasoning.maxOutputTokens).
+   * Raises prompt-defined maxTokens when a reasoning model consumes
+   * hidden thinking tokens from the response budget. Never lowers.
+   */
+  minResponseTokens?: number;
   modelTokenLimit?: number;
   tpmLimit?: number;
   repositoryProfile?: RepositoryProfile;
@@ -133,6 +140,7 @@ export class QEOrchestrator {
   private readonly maxModelCalls?: number;
   private readonly modelTokenLimit?: number;
   private readonly tpmLimit?: number;
+  private readonly minResponseTokens?: number;
   private readonly injectedProfile?: RepositoryProfile;
   private readonly injectedController?: ExecutionController;
   private readonly browserCapability?: BrowserCapability;
@@ -146,6 +154,7 @@ export class QEOrchestrator {
     this.maxModelCalls = options.maxModelCalls;
     this.modelTokenLimit = options.modelTokenLimit;
     this.tpmLimit = options.tpmLimit;
+    this.minResponseTokens = options.minResponseTokens;
     this.injectedProfile = options.repositoryProfile;
     this.injectedController = options.controller;
     this.browserCapability = options.browserCapability;
@@ -169,6 +178,7 @@ export class QEOrchestrator {
       maxRetriesPerCall: 2,
       modelTokenLimit: this.modelTokenLimit,
       tpmLimit: this.tpmLimit,
+      minResponseTokens: this.minResponseTokens,
     });
 
     const evidence: Evidence[] = [];
@@ -224,6 +234,7 @@ export class QEOrchestrator {
         ? this.injectedProfile
         : await analyzeRepository({
             targetPath: request.repositoryPath,
+            pathSource: request.pathSource,
           });
 
       evidence.push(...createDiscoveryEvidence(repositoryProfile));
@@ -852,7 +863,7 @@ export class QEOrchestrator {
           let effectiveBaseUrl = baseUrl;
 
           if (!effectiveBaseUrl && startCommand) {
-            const port = 3_100 + Math.floor(Math.random() * 900);
+            const port = await getFreePort();
             const processOptions: ManagedProcessOptions = {
               executable:
                 startCommand.executable ?? startCommand.command.split(" ")[0],

@@ -47,6 +47,13 @@ export type RequirementAssessment = z.infer<typeof RequirementAssessmentSchema>;
 
 export const QERequestSchema = z.object({
   repositoryPath: z.string().min(1),
+  /**
+   * "explicit" when the caller authoritatively selected repositoryPath
+   * (e.g. a --repo flag); "inferred" when it was derived from the
+   * environment (cwd, CI runner). Controls root discovery — see
+   * discoverRoot.
+   */
+  pathSource: z.enum(["explicit", "inferred"]).optional(),
   requirements: z.array(RequirementSchema).optional(),
   baselineRef: z.string().optional(),
   targetRef: z.string().optional(),
