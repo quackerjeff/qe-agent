@@ -4,6 +4,13 @@ export {
   McpPlaywrightAdapter,
   type McpPlaywrightOptions,
 } from "./mcp-playwright-adapter.js";
+export {
+  validateMcpInvocation,
+  launchControlledMcp,
+  killMcpProcessTree,
+  PINNED_PLAYWRIGHT_MCP_VERSION,
+  PINNED_MCP_PACKAGE,
+} from "./mcp-launcher.js";
 export { CompositeBrowserCapability } from "./composite.js";
 export { executeScenarioActions } from "./scenario-executor.js";
 export {

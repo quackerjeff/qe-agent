@@ -34,8 +34,9 @@ part of the QE core architecture — exactly mirroring the GitHub integration
    - harness detection (`isOpenCodeHarness`) and environment parsing
      (`parseOpenCodeContext`);
    - verdict-to-urgency mapping (deterministic wording of delivered results);
-   - an `OpenCodeClient` interface with `FakeOpenCodeClient` (tests) and
-     `HttpOpenCodeClient` (real server);
+   - an `OpenCodeClient` interface with `HttpOpenCodeClient` (real
+     server); the test double is `StubOpenCodeClient` in
+     `tests/helpers/opencode-stubs.ts` (test-only, not shipped);
    - an `OpenCodeReporter` that delivers a redacted, markdown-rendered QE
      verdict into a session and persists it under `.qe/runs/`.
 

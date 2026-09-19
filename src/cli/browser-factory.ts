@@ -9,14 +9,19 @@ import {
   McpPlaywrightAdapter,
   CompositeBrowserCapability,
 } from "../core/browser/index.js";
+import {
+  PINNED_MCP_PACKAGE,
+  validateMcpInvocation,
+} from "../core/browser/mcp-launcher.js";
 
 /**
- * Fallback Playwright MCP invocation (stdio JSON-RPC) when no local
- * installation is detected and no environment override is set. Downloads
- * from the network on first use.
+ * Pinned Playwright MCP invocation (stdio JSON-RPC) used only when no
+ * local installation is detected and no operator override is set.
+ * Pinned to an explicit release — never `@latest` (supply-chain pin).
+ * Network fetch occurs on first use; see ADR-012 for provisioning.
  */
 export const DEFAULT_MCP_COMMAND = "npx";
-export const DEFAULT_MCP_ARGS = ["@playwright/mcp@latest", "--headless"];
+export const DEFAULT_MCP_ARGS = [PINNED_MCP_PACKAGE, "--headless"];
 
 /**
  * Home directory for runtime discovery. Honors an explicit override
@@ -73,6 +78,14 @@ export async function detectInstalledPlaywrightMcp(): Promise<{
       );
       if (cliArg) {
         await access(cliArg, constants.R_OK);
+        // Operator-machine config is still untrusted input: only the
+        // provisioned @playwright/mcp CLI behind an approved launcher
+        // may be used.
+        try {
+          validateMcpInvocation(server.command, server.args);
+        } catch {
+          return null;
+        }
         return {
           command: server.command,
           args: [...server.args, "--headless"],
@@ -119,8 +132,14 @@ export async function detectInstalledPlaywrightMcp(): Promise<{
  *   local browser cannot be launched.
  *
  * MCP invocation resolution (no machine-specific paths in the codebase):
- * explicit `.qe/config.yml` browser.mcpCommand → runtime discovery
- * (env override, harness settings, npx cache) → npx network default.
+ * operator override (QE_PLAYWRIGHT_MCP_CLI) → runtime discovery
+ * (harness settings, npx cache) → pinned npx default.
+ *
+ * Repository-controlled `browser.mcpCommand` / `browser.mcpArgs` are
+ * intentionally NOT honored: the evaluated repository is untrusted and
+ * must not select an executable. When present they are ignored (with a
+ * stderr warning) so a malicious config cannot bypass the
+ * controlled-execution boundary.
  *
  * The orchestrator never spawns an MCP server unless the browser
  * capability is actually used; construction here is lazy and
@@ -139,12 +158,15 @@ export async function createBrowserCapability(
 
   let mcpOptions: { command: string; args: string[] };
   if (config.browser.mcpCommand) {
-    // Explicit user configuration always wins.
-    mcpOptions = {
-      command: config.browser.mcpCommand,
-      args: config.browser.mcpArgs ?? DEFAULT_MCP_ARGS,
-    };
-  } else {
+    // Prohibited: repository-controlled executable selection. Ignore
+    // and fall back to operator-controlled provisioning.
+    process.stderr.write(
+      "[qe] warning: browser.mcpCommand in .qe/config.yml is ignored — " +
+        "repository config must not select executables (ADR-012). " +
+        "Using provisioned Playwright MCP instead.\n",
+    );
+  }
+  {
     const installed = await detectInstalledPlaywrightMcp();
     mcpOptions = installed ?? {
       command: DEFAULT_MCP_COMMAND,

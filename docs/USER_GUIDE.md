@@ -586,15 +586,25 @@ On servers without a Chromium binary installed, browser validation falls back to
 ```yaml
 browser:
   adapter: auto              # auto (default) | local | mcp
-  mcpCommand: npx             # optional override
-  mcpArgs: ["@playwright/mcp@latest", "--headless"]
 ```
 
 - `auto` (default): tries local Chromium first; if the browser binary is missing (environment failure), the scenario is retried once through the Playwright MCP server.
 - `local`: local Chromium only — no fallback.
 - `mcp`: Playwright MCP server only — no local browser is launched.
 
-The MCP server is spawned only when browser validation actually runs, and is cleaned up after the run. URL policy, secret redaction, action validation, and budget enforcement apply identically under both adapters.
+> **Note:** `browser.mcpCommand` / `browser.mcpArgs` in `.qe/config.yml`
+> are accepted by the schema for backwards compatibility but are
+> **ignored at runtime** — repository configuration must not select
+> executables. The MCP server is provisioned by the operator/host only:
+> `QE_PLAYWRIGHT_MCP_CLI` env override → harness settings / npx cache
+> discovery → pinned `npx @playwright/mcp@<pinned> --headless` network
+> fallback (explicit release, never `@latest`; downloads from the npm
+> registry on first use, so it needs network access at startup — prefer
+> a locally provisioned copy on offline hosts). Launch uses the
+> controlled-execution boundary (executable/implementation allowlists,
+> filtered environment, bounded output, process-group cleanup).
+
+The MCP server is spawned only when browser validation actually runs, and is cleaned up after the run. URL policy (checked after every state-changing action and before every read/capture), secret redaction, action validation, screenshot confinement to the QE artifact directory, and budget enforcement apply identically under both adapters.
 
 ## Understanding QE Output
 
@@ -779,7 +789,11 @@ tests:
   commitPermanentTests: true
 browser:
   enabled: auto
+  adapter: auto
   headless: true
+  baseUrl: http://localhost:3000
+  allowedOrigins:
+    - http://localhost:3000
 ci:
   failOn:
     - FAIL
@@ -795,9 +809,14 @@ github:
 memory:
   enabled: true
   historySummaries: true
+opencode:
+  messageEnabled: true
+  toastEnabled: true
+  dryRun: false
 model:
   provider: openai
   model: gpt-4o
+  baseUrl: https://api.openai.com/v1
 reasoning:
   maxModelCalls: 12
 ```
@@ -812,10 +831,15 @@ reasoning:
 | `execution.maxOutputBytes` | — | Maximum captured output per command |
 | `tests.generation` | — | Whether QE Agent may generate tests |
 | `browser.enabled` | — | Browser testing: `auto`, `true`, `false` |
+| `browser.adapter` | — | Browser backend: `auto` (local-first with MCP fallback), `local`, `mcp` |
+| `browser.mcpCommand` / `browser.mcpArgs` | — | **Ignored at runtime** (legacy schema keys; repository config must not select executables — MCP is operator-provisioned, see above) |
+| `browser.baseUrl` / `browser.allowedOrigins` | — | Base URL and extra allowed origins for browser validation |
 | `ci.failOn` | — | Verdicts that cause non-zero exit in `--ci` mode |
 | `model.provider` | — | Model provider: `openai` (direct API), `opencode` (QE reasoning through the real `opencode` CLI headless — uses OpenCode's own configured model and auth) |
 | `model.model` | — | Model name (e.g., `gpt-4o`, `gpt-4o-mini`) |
-| `model.tpmLimit` | — | Tokens-per-minute throughput limit |
+| `model.baseUrl` | — | OpenAI-compatible base URL (local llama.cpp/llama-swap, ollama, vLLM). Prefer `QE_MODEL_BASE_URL` env to avoid committing addresses |
+| `model.tokenLimit` / `model.tpmLimit` | — | Context/token and tokens-per-minute throughput limits |
+| `opencode.messageEnabled` / `opencode.toastEnabled` / `opencode.dryRun` | — | OpenCode result delivery toggles (see `opencode publish`) |
 | `reasoning.maxModelCalls` | — | Maximum model calls per run |
 | `reasoning.maxOutputTokens` | — | Per-call response-token floor. Raises prompt-defined ceilings when using reasoning models whose hidden thinking tokens count against the response budget (e.g. ollama/OpenAI-compatible endpoints serving reasoning models). Never lowers. Unset = no floor. |
 | `memory.enabled` | — | Whether project memory persists across runs |

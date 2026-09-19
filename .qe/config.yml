@@ -14,7 +14,18 @@ tests:
   commitPermanentTests: true
 browser:
   enabled: auto
+  # Backend: auto (local Chromium first, MCP fallback) | local | mcp.
+  adapter: auto
+  # NOTE: browser.mcpCommand / browser.mcpArgs are NOT read from this
+  # file — repository config must not select executables. The Playwright
+  # MCP server is operator-provisioned: QE_PLAYWRIGHT_MCP_CLI env
+  # override → harness settings / npx cache → pinned npx fallback
+  # (network fetch on first use). See ADR-012.
   headless: true
+  # baseUrl / allowedOrigins scope browser navigation policy:
+  # baseUrl: http://localhost:3000
+  # allowedOrigins:
+  #   - http://localhost:3000
 ci:
   failOn:
     - FAIL
@@ -30,8 +41,16 @@ github:
 memory:
   enabled: true
   historySummaries: true
+# Deliver QE verdicts into an OpenCode session (ADR-011):
+# opencode:
+#   messageEnabled: true
+#   toastEnabled: true
+#   dryRun: false
 model:
   provider: openai
   model: gpt-4o-mini
+  # OpenAI-compatible endpoint. Prefer QE_MODEL_BASE_URL env for local
+  # addresses so they are not committed:
+  # baseUrl: http://localhost:8080/v1
 reasoning:
   maxModelCalls: 12

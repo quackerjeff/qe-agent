@@ -128,7 +128,8 @@ describe("detectInstalledPlaywrightMcp", () => {
     process.env.QE_DISCOVERY_HOME = "/nonexistent/qe-home";
     expect(await detectInstalledPlaywrightMcp()).toBeNull();
     expect(DEFAULT_MCP_COMMAND).toBe("npx");
-    expect(DEFAULT_MCP_ARGS[0]).toBe("@playwright/mcp@latest");
+    expect(DEFAULT_MCP_ARGS[0]).toMatch(/^@playwright\/mcp@\d+\.\d+\.\d+$/);
+    expect(DEFAULT_MCP_ARGS[0]).not.toContain("latest");
   });
 
   it("prefers Kiro's server over an npx cache entry", async () => {
